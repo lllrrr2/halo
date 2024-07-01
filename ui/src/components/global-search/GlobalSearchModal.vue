@@ -1,24 +1,25 @@
 <script lang="ts" setup>
-import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
-import {
-  VModal,
-  VEntity,
-  VEntityField,
-  IconLink,
-  IconBookRead,
-  IconFolder,
-  IconSettings,
-  IconPalette,
-  IconPages,
-  IconUserSettings,
-} from "@halo-dev/components";
-import { computed, markRaw, ref, watch, type Component } from "vue";
-import Fuse from "fuse.js";
-import { apiClient } from "@/utils/api-client";
 import { usePermission } from "@/utils/permission";
 import { useThemeStore } from "@console/stores/theme";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
+import {
+  IconBookRead,
+  IconFolder,
+  IconLink,
+  IconPages,
+  IconPalette,
+  IconSettings,
+  IconUserSettings,
+  VEntity,
+  VEntityField,
+  VModal,
+} from "@halo-dev/components";
+import { useEventListener } from "@vueuse/core";
+import Fuse from "fuse.js";
 import { storeToRefs } from "pinia";
+import { computed, markRaw, onMounted, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 
 const router = useRouter();
 const route = useRoute();
@@ -27,19 +28,11 @@ const { t } = useI18n();
 const { currentUserHasPermission } = usePermission();
 const { activatedTheme } = storeToRefs(useThemeStore());
 
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-  }>(),
-  {
-    visible: false,
-  }
-);
-
 const emit = defineEmits<{
-  (e: "update:visible", visible: boolean): void;
+  (e: "close"): void;
 }>();
 
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 const globalSearchInput = ref<HTMLInputElement | null>(null);
 const keyword = ref("");
 
@@ -86,7 +79,7 @@ const handleBuildSearchIndex = () => {
   });
 
   if (currentUserHasPermission(["system:users:view"])) {
-    apiClient.extension.user.listv1alpha1User().then((response) => {
+    coreApiClient.user.listUser().then((response) => {
       response.data.items.forEach((user) => {
         fuse.add({
           title: user.spec.displayName,
@@ -106,50 +99,46 @@ const handleBuildSearchIndex = () => {
   }
 
   if (currentUserHasPermission(["system:plugins:view"])) {
-    apiClient.extension.plugin
-      .listpluginHaloRunV1alpha1Plugin()
-      .then((response) => {
-        response.data.items.forEach((plugin) => {
-          fuse.add({
-            title: plugin.spec.displayName as string,
-            icon: {
-              src: plugin.status?.logo as string,
+    coreApiClient.plugin.plugin.listPlugin().then((response) => {
+      response.data.items.forEach((plugin) => {
+        fuse.add({
+          title: plugin.spec.displayName as string,
+          icon: {
+            src: plugin.status?.logo as string,
+          },
+          group: t("core.components.global_search.groups.plugin"),
+          route: {
+            name: "PluginDetail",
+            params: {
+              name: plugin.metadata.name,
             },
-            group: t("core.components.global_search.groups.plugin"),
-            route: {
-              name: "PluginDetail",
-              params: {
-                name: plugin.metadata.name,
-              },
-            },
-          });
+          },
         });
       });
+    });
   }
 
   if (currentUserHasPermission(["system:posts:view"])) {
-    apiClient.extension.post
-      .listcontentHaloRunV1alpha1Post()
-      .then((response) => {
-        response.data.items.forEach((post) => {
-          fuse.add({
-            title: post.spec.title,
-            icon: {
-              component: markRaw(IconBookRead),
+    coreApiClient.content.post.listPost().then((response) => {
+      response.data.items.forEach((post) => {
+        fuse.add({
+          title: post.spec.title,
+          icon: {
+            component: markRaw(IconBookRead),
+          },
+          group: t("core.components.global_search.groups.post"),
+          route: {
+            name: "PostEditor",
+            query: {
+              name: post.metadata.name,
             },
-            group: t("core.components.global_search.groups.post"),
-            route: {
-              name: "PostEditor",
-              query: {
-                name: post.metadata.name,
-              },
-            },
-          });
+          },
         });
       });
+    });
 
-    apiClient.extension.category
-      .listcontentHaloRunV1alpha1Category({
+    coreApiClient.content.category
+      .listCategory({
         sort: ["metadata.creationTimestamp,desc"],
       })
       .then((response) => {
@@ -170,8 +159,8 @@ const handleBuildSearchIndex = () => {
         });
       });
 
-    apiClient.extension.tag
-      .listcontentHaloRunV1alpha1Tag({
+    coreApiClient.content.tag
+      .listTag({
         sort: ["metadata.creationTimestamp,desc"],
       })
       .then((response) => {
@@ -194,76 +183,70 @@ const handleBuildSearchIndex = () => {
   }
 
   if (currentUserHasPermission(["system:singlepages:view"])) {
-    apiClient.extension.singlePage
-      .listcontentHaloRunV1alpha1SinglePage()
-      .then((response) => {
-        response.data.items.forEach((singlePage) => {
-          fuse.add({
-            title: singlePage.spec.title,
-            icon: {
-              component: markRaw(IconPages),
+    coreApiClient.content.singlePage.listSinglePage().then((response) => {
+      response.data.items.forEach((singlePage) => {
+        fuse.add({
+          title: singlePage.spec.title,
+          icon: {
+            component: markRaw(IconPages),
+          },
+          group: t("core.components.global_search.groups.page"),
+          route: {
+            name: "SinglePageEditor",
+            query: {
+              name: singlePage.metadata.name,
             },
-            group: t("core.components.global_search.groups.page"),
-            route: {
-              name: "SinglePageEditor",
-              query: {
-                name: singlePage.metadata.name,
-              },
-            },
-          });
+          },
         });
       });
+    });
   }
 
   if (currentUserHasPermission(["system:attachments:view"])) {
-    apiClient.extension.storage.attachment
-      .liststorageHaloRunV1alpha1Attachment()
-      .then((response) => {
-        response.data.items.forEach((attachment) => {
-          fuse.add({
-            title: attachment.spec.displayName as string,
-            icon: {
-              component: markRaw(IconFolder),
+    coreApiClient.storage.attachment.listAttachment().then((response) => {
+      response.data.items.forEach((attachment) => {
+        fuse.add({
+          title: attachment.spec.displayName as string,
+          icon: {
+            component: markRaw(IconFolder),
+          },
+          group: t("core.components.global_search.groups.attachment"),
+          route: {
+            name: "Attachments",
+            query: {
+              name: attachment.metadata.name,
             },
-            group: t("core.components.global_search.groups.attachment"),
-            route: {
-              name: "Attachments",
-              query: {
-                name: attachment.metadata.name,
-              },
-            },
-          });
+          },
         });
       });
+    });
   }
 
   if (
     currentUserHasPermission(["system:settings:view"]) &&
     currentUserHasPermission(["system:configmaps:view"])
   ) {
-    apiClient.extension.setting
-      .getv1alpha1Setting({ name: "system" })
-      .then((response) => {
-        response.data.spec.forms.forEach((form) => {
-          fuse.add({
-            title: form.label as string,
-            icon: {
-              component: markRaw(IconSettings),
+    coreApiClient.setting.getSetting({ name: "system" }).then((response) => {
+      response.data.spec.forms.forEach((form) => {
+        fuse.add({
+          title: form.label as string,
+          icon: {
+            component: markRaw(IconSettings),
+          },
+          group: t("core.components.global_search.groups.setting"),
+          route: {
+            name: "SystemSetting",
+            params: {
+              group: form.group,
             },
-            group: t("core.components.global_search.groups.setting"),
-            route: {
-              name: "SystemSetting",
-              params: {
-                group: form.group,
-              },
-            },
-          });
+          },
         });
       });
+    });
   }
 
   if (currentUserHasPermission(["system:themes:view"])) {
-    apiClient.theme
+    consoleApiClient.theme.theme
       .fetchThemeSetting({ name: "-" })
       .then(({ data: themeSettings }) => {
         themeSettings.spec.forms.forEach((form) => {
@@ -288,10 +271,6 @@ const handleBuildSearchIndex = () => {
 };
 
 const handleKeydown = (e: KeyboardEvent) => {
-  if (!props.visible) {
-    return;
-  }
-
   const { key, ctrlKey } = e;
 
   if (key === "ArrowUp" || (key === "k" && ctrlKey)) {
@@ -313,7 +292,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 
   if (key === "Escape") {
-    onVisibleChange(false);
+    modal.value?.close();
     e.preventDefault();
   }
 };
@@ -328,7 +307,7 @@ const handleRoute = async (item: SearchableItem) => {
     }
   }
   router.push(item.route);
-  emit("update:visible", false);
+  modal.value?.close();
 };
 
 watch(
@@ -349,39 +328,26 @@ watch(
   }
 );
 
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      handleBuildSearchIndex();
+onMounted(() => {
+  handleBuildSearchIndex();
 
-      setTimeout(() => {
-        globalSearchInput.value?.focus();
-      }, 100);
+  setTimeout(() => {
+    globalSearchInput.value?.focus();
+  }, 100);
+});
 
-      document.addEventListener("keydown", handleKeydown);
-    } else {
-      document.removeEventListener("keydown", handleKeydown);
-      keyword.value = "";
-      selectedIndex.value = 0;
-    }
-  }
-);
-
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-};
+useEventListener("keydown", handleKeydown);
 </script>
 
 <template>
   <VModal
-    :visible="visible"
+    ref="modal"
     :body-class="['!p-0']"
     :mount-to-body="true"
     :width="650"
     :centered="false"
     :layer-closable="true"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <div id="search-input" class="border-b border-gray-100 px-4 py-2.5">
       <input

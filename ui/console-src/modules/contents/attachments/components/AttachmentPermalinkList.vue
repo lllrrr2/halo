@@ -1,17 +1,15 @@
 <script lang="ts" setup>
-import { VButton } from "@halo-dev/components";
 import type { Attachment } from "@halo-dev/api-client";
+import { VButton } from "@halo-dev/components";
+import { computed, toRefs } from "vue";
 import { useAttachmentPermalinkCopy } from "../composables/use-attachment";
-import { toRefs, computed } from "vue";
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
     attachment?: Attachment;
     mountToBody?: boolean;
   }>(),
   {
-    visible: false,
     attachment: undefined,
     mountToBody: false,
   }

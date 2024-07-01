@@ -1,12 +1,13 @@
-import { usePluginModuleStore } from "@/stores/plugin";
-import type { EditorProvider, PluginModule } from "@halo-dev/console-shared";
-import { onMounted, ref, type Ref, defineAsyncComponent, markRaw } from "vue";
-import { VLoading } from "@halo-dev/components";
 import Logo from "@/assets/logo.png";
+import { usePluginModuleStore } from "@/stores/plugin";
+import { VLoading } from "@halo-dev/components";
+import type { EditorProvider } from "@halo-dev/console-shared";
+import { defineAsyncComponent, markRaw, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 interface useEditorExtensionPointsReturn {
   editorProviders: Ref<EditorProvider[]>;
+  fetchEditorProviders: () => Promise<void>;
 }
 
 export function useEditorExtensionPoints(): useEditorExtensionPointsReturn {
@@ -30,20 +31,27 @@ export function useEditorExtensionPoints(): useEditorExtensionPointsReturn {
     },
   ]);
 
-  onMounted(() => {
-    pluginModules.forEach((pluginModule: PluginModule) => {
-      const { extensionPoints } = pluginModule;
-      if (!extensionPoints?.["editor:create"]) {
-        return;
+  async function fetchEditorProviders() {
+    for (const pluginModule of pluginModules) {
+      try {
+        const callbackFunction =
+          pluginModule?.extensionPoints?.["editor:create"];
+
+        if (typeof callbackFunction !== "function") {
+          continue;
+        }
+
+        const pluginProviders = await callbackFunction();
+
+        editorProviders.value.push(...pluginProviders);
+      } catch (error) {
+        console.error(`Error processing plugin module:`, pluginModule, error);
       }
-
-      const providers = extensionPoints["editor:create"]() as EditorProvider[];
-
-      editorProviders.value.push(...providers);
-    });
-  });
+    }
+  }
 
   return {
     editorProviders,
+    fetchEditorProviders,
   };
 }

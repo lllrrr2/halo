@@ -1,31 +1,36 @@
 <script setup lang="ts">
+import SnapshotContent from "@console/modules/contents/posts/components/SnapshotContent.vue";
+import SnapshotListItem from "@console/modules/contents/posts/components/SnapshotListItem.vue";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconHistoryLine,
+  Toast,
   VButton,
   VCard,
   VLoading,
   VPageHeader,
+  VSpace,
 } from "@halo-dev/components";
-import { useQuery } from "@tanstack/vue-query";
-import { useRoute } from "vue-router";
-import { apiClient } from "@/utils/api-client";
-import { computed, watch } from "vue";
-import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRouteQuery } from "@vueuse/router";
-import SnapshotContent from "@console/modules/contents/posts/components/SnapshotContent.vue";
-import SnapshotListItem from "@console/modules/contents/posts/components/SnapshotListItem.vue";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import { computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useRoute } from "vue-router";
 
+const { t } = useI18n();
 const route = useRoute();
+const queryClient = useQueryClient();
 
 const postName = computed(() => route.query.name as string);
 
 const { data: post } = useQuery({
   queryKey: ["post-by-name", postName],
   queryFn: async () => {
-    const { data } =
-      await apiClient.extension.post.getcontentHaloRunV1alpha1Post({
-        name: postName.value,
-      });
+    const { data } = await coreApiClient.content.post.getPost({
+      name: postName.value,
+    });
     return data;
   },
   enabled: computed(() => !!postName.value),
@@ -34,7 +39,7 @@ const { data: post } = useQuery({
 const { data: snapshots, isLoading } = useQuery({
   queryKey: ["post-snapshots-by-post-name", postName],
   queryFn: async () => {
-    const { data } = await apiClient.post.listPostSnapshots({
+    const { data } = await consoleApiClient.content.post.listPostSnapshots({
       name: postName.value,
     });
     return data;
@@ -70,6 +75,43 @@ watch(
     immediate: true,
   }
 );
+
+function handleCleanup() {
+  Dialog.warning({
+    title: t("core.post_snapshots.operations.cleanup.title"),
+    description: t("core.post_snapshots.operations.cleanup.description"),
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
+    async onConfirm() {
+      const { releaseSnapshot, baseSnapshot, headSnapshot } =
+        post.value?.spec || {};
+      const snapshotsToDelete = snapshots.value?.filter((snapshot) => {
+        const { name } = snapshot.metadata;
+        return ![releaseSnapshot, baseSnapshot, headSnapshot]
+          .filter(Boolean)
+          .includes(name);
+      });
+
+      if (!snapshotsToDelete?.length) {
+        Toast.info(t("core.post_snapshots.operations.cleanup.toast_empty"));
+        return;
+      }
+
+      for (let i = 0; i < snapshotsToDelete?.length; i++) {
+        await consoleApiClient.content.post.deletePostContent({
+          name: postName.value,
+          snapshotName: snapshotsToDelete[i].metadata.name,
+        });
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ["post-snapshots-by-post-name", postName],
+      });
+
+      Toast.success(t("core.post_snapshots.operations.cleanup.toast_success"));
+    },
+  });
+}
 </script>
 
 <template>
@@ -78,9 +120,14 @@ watch(
       <IconHistoryLine class="mr-2 self-center" />
     </template>
     <template #actions>
-      <VButton size="sm" @click="$router.back()">
-        {{ $t("core.common.buttons.back") }}
-      </VButton>
+      <VSpace>
+        <VButton size="sm" @click="$router.back()">
+          {{ $t("core.common.buttons.back") }}
+        </VButton>
+        <VButton size="sm" type="danger" @click="handleCleanup">
+          {{ $t("core.post_snapshots.operations.cleanup.button") }}
+        </VButton>
+      </VSpace>
     </template>
   </VPageHeader>
 

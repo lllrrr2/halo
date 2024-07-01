@@ -1,33 +1,33 @@
 <script lang="ts" setup>
+import GlobalSearchModal from "@/components/global-search/GlobalSearchModal.vue";
+import LoginModal from "@/components/login/LoginModal.vue";
+import { RoutesMenu } from "@/components/menu/RoutesMenu";
+import { useRouteMenuGenerator } from "@/composables/use-route-menu-generator";
+import { rbacAnnotations } from "@/constants/annotations";
+import { useUserStore } from "@/stores/user";
+import { isMac } from "@/utils/device";
+import { coreMenuGroups } from "@console/router/constant";
 import {
+  Dialog,
+  IconAccountCircleLine,
+  IconLogoutCircleRLine,
   IconMore,
   IconSearch,
   IconUserSettings,
-  IconLogoutCircleRLine,
-  VTag,
   VAvatar,
-  Dialog,
-  IconAccountCircleLine,
+  VTag,
 } from "@halo-dev/components";
-import { RoutesMenu } from "@/components/menu/RoutesMenu";
-import IconLogo from "~icons/core/logo?width=5rem&height=2rem";
-import { RouterView, useRoute, useRouter } from "vue-router";
-import { onMounted, reactive, ref } from "vue";
+import { useEventListener } from "@vueuse/core";
 import axios from "axios";
-import GlobalSearchModal from "@/components/global-search/GlobalSearchModal.vue";
-import LoginModal from "@/components/login/LoginModal.vue";
-import { coreMenuGroups } from "@console/router/constant";
-import { useUserStore } from "@/stores/user";
-import { rbacAnnotations } from "@/constants/annotations";
-import { defineStore, storeToRefs } from "pinia";
-import { useI18n } from "vue-i18n";
 import {
   useOverlayScrollbars,
   type UseOverlayScrollbarsParams,
 } from "overlayscrollbars-vue";
-import { isMac } from "@/utils/device";
-import { useEventListener } from "@vueuse/core";
-import { useRouteMenuGenerator } from "@/composables/use-route-menu-generator";
+import { defineStore, storeToRefs } from "pinia";
+import { onMounted, reactive, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { RouterView, useRoute, useRouter } from "vue-router";
+import IconLogo from "~icons/core/logo?width=5rem&height=2rem";
 
 const route = useRoute();
 const router = useRouter();
@@ -47,11 +47,15 @@ const handleLogout = () => {
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
       try {
-        await axios.post(`${import.meta.env.VITE_API_URL}/logout`, undefined, {
+        await axios.post(`/logout`, undefined, {
           withCredentials: true,
         });
 
         await userStore.fetchCurrentUser();
+
+        // Clear csrf token
+        document.cookie =
+          "XSRF-TOKEN=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
 
         router.replace({ name: "Login" });
       } catch (error) {
@@ -295,7 +299,10 @@ onMounted(() => {
       </Teleport>
     </div>
   </div>
-  <GlobalSearchModal v-model:visible="globalSearchVisible" />
+  <GlobalSearchModal
+    v-if="globalSearchVisible"
+    @close="globalSearchVisible = false"
+  />
   <LoginModal />
 </template>
 

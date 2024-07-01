@@ -20,6 +20,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+import run.halo.app.security.LoginHandlerEnhancer;
 import run.halo.app.security.authentication.twofactor.TwoFactorAuthentication;
 
 @Slf4j
@@ -30,30 +31,35 @@ public class UsernamePasswordHandler implements ServerAuthenticationSuccessHandl
 
     private final MessageSource messageSource;
 
+    private final LoginHandlerEnhancer loginHandlerEnhancer;
+
     private final ServerAuthenticationFailureHandler defaultFailureHandler =
         new RedirectServerAuthenticationFailureHandler("/console?error#/login");
 
     private final ServerAuthenticationSuccessHandler defaultSuccessHandler =
         new RedirectServerAuthenticationSuccessHandler("/console/");
 
-    public UsernamePasswordHandler(ServerResponse.Context context, MessageSource messageSource) {
+    public UsernamePasswordHandler(ServerResponse.Context context, MessageSource messageSource,
+        LoginHandlerEnhancer loginHandlerEnhancer) {
         this.context = context;
         this.messageSource = messageSource;
+        this.loginHandlerEnhancer = loginHandlerEnhancer;
     }
 
     @Override
     public Mono<Void> onAuthenticationFailure(WebFilterExchange webFilterExchange,
         AuthenticationException exception) {
         var exchange = webFilterExchange.getExchange();
-        return ignoringMediaTypeAll(APPLICATION_JSON)
-            .matches(exchange)
-            .filter(ServerWebExchangeMatcher.MatchResult::isMatch)
-            .switchIfEmpty(
-                defaultFailureHandler.onAuthenticationFailure(webFilterExchange, exception)
-                    // Skip the handleAuthenticationException.
-                    .then(Mono.empty())
-            )
-            .flatMap(matchResult -> handleAuthenticationException(exception, exchange));
+        return loginHandlerEnhancer.onLoginFailure(exchange, exception)
+            .then(ignoringMediaTypeAll(APPLICATION_JSON)
+                .matches(exchange)
+                .filter(ServerWebExchangeMatcher.MatchResult::isMatch)
+                .switchIfEmpty(
+                    defaultFailureHandler.onAuthenticationFailure(webFilterExchange, exception)
+                        // Skip the handleAuthenticationException.
+                        .then(Mono.empty())
+                )
+                .flatMap(matchResult -> handleAuthenticationException(exception, exchange)));
     }
 
     @Override
@@ -61,7 +67,13 @@ public class UsernamePasswordHandler implements ServerAuthenticationSuccessHandl
         Authentication authentication) {
         if (authentication instanceof TwoFactorAuthentication) {
             // continue filtering for authorization
-            return webFilterExchange.getChain().filter(webFilterExchange.getExchange());
+            return loginHandlerEnhancer.onLoginSuccess(webFilterExchange.getExchange(),
+                    authentication)
+                .then(webFilterExchange.getChain().filter(webFilterExchange.getExchange()));
+        }
+
+        if (authentication instanceof CredentialsContainer container) {
+            container.eraseCredentials();
         }
 
         ServerWebExchangeMatcher xhrMatcher = exchange -> {
@@ -73,20 +85,16 @@ public class UsernamePasswordHandler implements ServerAuthenticationSuccessHandl
         };
 
         var exchange = webFilterExchange.getExchange();
-        return xhrMatcher.matches(exchange)
-            .filter(ServerWebExchangeMatcher.MatchResult::isMatch)
-            .switchIfEmpty(Mono.defer(
-                () -> defaultSuccessHandler.onAuthenticationSuccess(webFilterExchange,
-                        authentication)
-                    .then(Mono.empty())))
-            .flatMap(isXhr -> {
-                if (authentication instanceof CredentialsContainer container) {
-                    container.eraseCredentials();
-                }
-                return ServerResponse.ok()
+        return loginHandlerEnhancer.onLoginSuccess(webFilterExchange.getExchange(), authentication)
+            .then(xhrMatcher.matches(exchange)
+                .filter(ServerWebExchangeMatcher.MatchResult::isMatch)
+                .switchIfEmpty(Mono.defer(
+                    () -> defaultSuccessHandler.onAuthenticationSuccess(webFilterExchange,
+                            authentication)
+                        .then(Mono.empty())))
+                .flatMap(isXhr -> ServerResponse.ok()
                     .bodyValue(authentication.getPrincipal())
-                    .flatMap(response -> response.writeTo(exchange, context));
-            });
+                    .flatMap(response -> response.writeTo(exchange, context))));
     }
 
     private Mono<Void> handleAuthenticationException(Throwable exception,

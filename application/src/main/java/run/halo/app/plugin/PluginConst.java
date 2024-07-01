@@ -16,11 +16,13 @@ public interface PluginConst {
 
     String RELOAD_ANNO = "plugin.halo.run/reload";
 
+    String REQUEST_TO_UNLOAD_LABEL = "plugin.halo.run/request-to-unload";
+
     String PLUGIN_PATH = "plugin.halo.run/plugin-path";
 
     String RUNTIME_MODE_ANNO = "plugin.halo.run/runtime-mode";
 
-    static String assertsRoutePrefix(String pluginName) {
+    static String assetsRoutePrefix(String pluginName) {
         return "/plugins/" + pluginName + "/assets/";
     }
 

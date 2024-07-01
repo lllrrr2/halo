@@ -1,18 +1,18 @@
 <script lang="ts" setup>
+import { useThemeStore } from "@console/stores/theme";
+import type { Theme } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
   IconAddCircle,
   VButton,
   VEmpty,
-  VSpace,
   VLoading,
+  VSpace,
 } from "@halo-dev/components";
-import ThemePreviewModal from "../preview/ThemePreviewModal.vue";
-import ThemeListItem from "../ThemeListItem.vue";
-import { ref, inject, type Ref } from "vue";
-import type { Theme } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
 import { useQuery } from "@tanstack/vue-query";
-import { useThemeStore } from "@console/stores/theme";
+import { inject, ref, type Ref } from "vue";
+import ThemeListItem from "../ThemeListItem.vue";
+import ThemePreviewModal from "../preview/ThemePreviewModal.vue";
 
 const themeStore = useThemeStore();
 
@@ -31,7 +31,7 @@ const {
 } = useQuery<Theme[]>({
   queryKey: ["installed-themes"],
   queryFn: async () => {
-    const { data } = await apiClient.theme.listThemes({
+    const { data } = await consoleApiClient.theme.theme.listThemes({
       page: 0,
       size: 0,
       uninstalled: false,
@@ -48,11 +48,11 @@ const {
     });
   },
   refetchInterval(data) {
-    const deletingThemes = data?.filter(
+    const hasDeletingTheme = data?.some(
       (theme) => !!theme.metadata.deletionTimestamp
     );
 
-    return deletingThemes?.length ? 1000 : false;
+    return hasDeletingTheme ? 1000 : false;
   },
 });
 

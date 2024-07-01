@@ -1,33 +1,30 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
 import SubmitButton from "@/components/button/SubmitButton.vue";
-import type { Group } from "@halo-dev/api-client";
-import { computed, ref, watch } from "vue";
-import { cloneDeep } from "lodash-es";
-import { apiClient } from "@/utils/api-client";
-import { reset } from "@formkit/core";
 import { setFocus } from "@/formkit/utils/focus";
+import type { Group } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { cloneDeep } from "lodash-es";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
-    group: Group | null;
+    group?: Group;
   }>(),
   {
-    visible: false,
-    group: null,
+    group: undefined,
   }
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
 const { t } = useI18n();
 
-const initialFormState: Group = {
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const formState = ref<Group>({
   spec: {
     displayName: "",
   },
@@ -37,88 +34,51 @@ const initialFormState: Group = {
     name: "",
     generateName: "attachment-group-",
   },
-};
-
-const formState = ref<Group>(cloneDeep(initialFormState));
-const saving = ref(false);
-
-const isUpdateMode = computed(() => {
-  return !!formState.value.metadata.creationTimestamp;
 });
+const isSubmitting = ref(false);
 
-const modalTitle = computed(() => {
-  return isUpdateMode.value
-    ? t("core.attachment.group_editing_modal.titles.update")
-    : t("core.attachment.group_editing_modal.titles.create");
-});
+const modalTitle = props.group
+  ? t("core.attachment.group_editing_modal.titles.update")
+  : t("core.attachment.group_editing_modal.titles.create");
 
 const handleSave = async () => {
   try {
-    saving.value = true;
-    if (isUpdateMode.value) {
-      await apiClient.extension.storage.group.updatestorageHaloRunV1alpha1Group(
-        {
-          name: formState.value.metadata.name,
-          group: formState.value,
-        }
-      );
+    isSubmitting.value = true;
+    if (props.group) {
+      await coreApiClient.storage.group.updateGroup({
+        name: formState.value.metadata.name,
+        group: formState.value,
+      });
     } else {
-      await apiClient.extension.storage.group.createstorageHaloRunV1alpha1Group(
-        {
-          group: formState.value,
-        }
-      );
+      await coreApiClient.storage.group.createGroup({
+        group: formState.value,
+      });
     }
 
     Toast.success(t("core.common.toast.save_success"));
-    onVisibleChange(false);
+    modal.value?.close();
   } catch (e) {
     console.error("Failed to save attachment group", e);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
+onMounted(() => {
+  setFocus("displayNameInput");
 
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("attachment-group-form");
-};
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      setFocus("displayNameInput");
-    } else {
-      handleResetForm();
-    }
+  if (props.group) {
+    formState.value = cloneDeep(props.group);
   }
-);
-
-watch(
-  () => props.group,
-  (group) => {
-    if (group) {
-      formState.value = cloneDeep(group);
-    } else {
-      handleResetForm();
-    }
-  }
-);
+});
 </script>
 <template>
   <VModal
+    ref="modal"
+    mount-to-body
     :title="modalTitle"
-    :visible="visible"
     :width="500"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <FormKit
       id="attachment-group-form"
@@ -142,14 +102,13 @@ watch(
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('attachment-group-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

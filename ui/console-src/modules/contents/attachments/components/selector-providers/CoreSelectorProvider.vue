@@ -1,27 +1,27 @@
 <script lang="ts" setup>
+import LazyImage from "@/components/image/LazyImage.vue";
+import { isImage } from "@/utils/image";
+import { matchMediaTypes } from "@/utils/media-type";
+import type { Attachment, Group } from "@halo-dev/api-client";
 import {
-  IconCheckboxFill,
   IconArrowLeft,
   IconArrowRight,
+  IconCheckboxCircle,
+  IconCheckboxFill,
+  IconEye,
+  IconUpload,
+  VButton,
   VCard,
   VEmpty,
-  VSpace,
-  VButton,
-  IconUpload,
   VPagination,
-  IconEye,
-  IconCheckboxCircle,
+  VSpace,
 } from "@halo-dev/components";
-import { watchEffect, ref } from "vue";
-import { isImage } from "@/utils/image";
-import { useAttachmentControl } from "../../composables/use-attachment";
-import LazyImage from "@/components/image/LazyImage.vue";
 import type { AttachmentLike } from "@halo-dev/console-shared";
-import type { Attachment, Group } from "@halo-dev/api-client";
-import AttachmentUploadModal from "../AttachmentUploadModal.vue";
+import { computed, ref, watchEffect } from "vue";
+import { useAttachmentControl } from "../../composables/use-attachment";
 import AttachmentDetailModal from "../AttachmentDetailModal.vue";
 import AttachmentGroupList from "../AttachmentGroupList.vue";
-import { matchMediaTypes } from "@/utils/media-type";
+import AttachmentUploadModal from "../AttachmentUploadModal.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -43,7 +43,7 @@ const emit = defineEmits<{
   (event: "change-provider", providerId: string): void;
 }>();
 
-const selectedGroup = ref<Group>();
+const selectedGroup = ref();
 const page = ref(1);
 const size = ref(60);
 
@@ -59,7 +59,14 @@ const {
   handleSelectNext,
   handleReset,
   isChecked,
-} = useAttachmentControl({ group: selectedGroup, page, size });
+} = useAttachmentControl({
+  groupName: selectedGroup,
+  accepts: computed(() => {
+    return props.accepts;
+  }),
+  page,
+  size,
+});
 
 const uploadVisible = ref(false);
 const detailVisible = ref(false);
@@ -89,13 +96,19 @@ const isDisabled = (attachment: Attachment) => {
 
   return !isMatchMediaType;
 };
+
+function onUploadModalClose() {
+  handleFetchAttachments();
+  uploadVisible.value = false;
+}
+
+function onGroupSelect(group: Group) {
+  selectedGroup.value = group.metadata.name;
+  handleReset();
+}
 </script>
 <template>
-  <AttachmentGroupList
-    v-model:selected-group="selectedGroup"
-    readonly
-    @select="handleReset"
-  />
+  <AttachmentGroupList readonly @select="onGroupSelect" />
   <div v-if="attachments?.length" class="mb-5">
     <VButton @click="uploadVisible = true">
       <template #icon>
@@ -208,10 +221,7 @@ const isDisabled = (attachment: Attachment) => {
       :size-options="[60, 120, 200]"
     />
   </div>
-  <AttachmentUploadModal
-    v-model:visible="uploadVisible"
-    @close="handleFetchAttachments"
-  />
+  <AttachmentUploadModal v-if="uploadVisible" @close="onUploadModalClose" />
   <AttachmentDetailModal
     v-model:visible="detailVisible"
     :mount-to-body="true"

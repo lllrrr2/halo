@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { VModal } from "../modal";
-import { VButton } from "../button";
+import type { Type as ButtonType } from "@/components/button/interface";
+import type { Type } from "@/components/dialog/interface";
+import { markRaw, ref, type Component, type Raw } from "vue";
 import {
   IconCheckboxCircle,
   IconClose,
@@ -8,9 +9,8 @@ import {
   IconForbidLine,
   IconInformation,
 } from "../../icons/icons";
-import { ref, type Component, markRaw, type Raw } from "vue";
-import type { Type } from "@/components/dialog/interface";
-import type { Type as ButtonType } from "@/components/button/interface";
+import { VButton } from "../button";
+import { VModal } from "../modal";
 
 const props = withDefaults(
   defineProps<{
@@ -109,7 +109,7 @@ const handleClose = () => {
         <component
           :is="icons[type].icon"
           :class="`text-${icons[type].color}-500`"
-          class="w-6 h-6"
+          class="w-6 h-6 flex-none"
         ></component>
         <div class="text-base text-gray-900 font-bold">{{ title }}</div>
       </div>

@@ -1,11 +1,11 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import { computed, ref } from "vue";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { apiClient } from "@/utils/api-client";
-import type { VerifyCodeRequest } from "@halo-dev/api-client";
 import { useUserStore } from "@/stores/user";
+import type { VerifyCodeRequest } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { useIntervalFn } from "@vueuse/shared";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const queryClient = useQueryClient();
@@ -17,7 +17,7 @@ const emit = defineEmits<{
   (event: "close"): void;
 }>();
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
 // count down
 const timer = ref(0);
@@ -48,7 +48,7 @@ const { mutate: sendVerifyCode, isLoading: isSending } = useMutation({
       );
       throw new Error("email is empty");
     }
-    return await apiClient.user.sendEmailVerificationCode({
+    return await consoleApiClient.user.sendEmailVerificationCode({
       emailVerifyRequest: {
         email: email.value,
       },
@@ -80,7 +80,7 @@ const sendVerifyCodeButtonText = computed(() => {
 const { mutate: verifyEmail, isLoading: isVerifying } = useMutation({
   mutationKey: ["verify-email"],
   mutationFn: async ({ password, code }: VerifyCodeRequest) => {
-    return await apiClient.user.verifyEmail({
+    return await consoleApiClient.user.verifyEmail({
       verifyCodeRequest: {
         password,
         code,
@@ -93,7 +93,7 @@ const { mutate: verifyEmail, isLoading: isVerifying } = useMutation({
     );
     queryClient.invalidateQueries({ queryKey: ["user-detail"] });
     fetchCurrentUser();
-    modal.value.close();
+    modal.value?.close();
   },
 });
 
@@ -163,7 +163,7 @@ function handleVerify({ password, code }: VerifyCodeRequest) {
         >
           {{ $t("core.common.buttons.verify") }}
         </VButton>
-        <VButton @click="modal.close()">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.close_and_shortcut") }}
         </VButton>
       </VSpace>

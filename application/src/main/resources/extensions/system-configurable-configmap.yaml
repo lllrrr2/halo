@@ -6,7 +6,8 @@ data:
   user: |
     {
       "allowRegistration": false,
-      "defaultRole": "",
+      "mustVerifyEmailOnRegistration": false,
+      "defaultRole": "guest",
       "avatarPolicy": "default-policy"
     }
   theme: |
@@ -44,4 +45,8 @@ data:
   menu: |
     {
       "primary": "primary"
+    }
+  extensionPointEnabled: |
+    {
+      "search-engine": ["search-engine-lucene"]
     }

@@ -1,31 +1,36 @@
 <script setup lang="ts">
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconHistoryLine,
+  Toast,
   VButton,
   VCard,
   VLoading,
   VPageHeader,
+  VSpace,
 } from "@halo-dev/components";
-import { useQuery } from "@tanstack/vue-query";
-import { useRoute } from "vue-router";
-import { apiClient } from "@/utils/api-client";
-import { computed, watch } from "vue";
-import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRouteQuery } from "@vueuse/router";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import { computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useRoute } from "vue-router";
 import SnapshotContent from "./components/SnapshotContent.vue";
 import SnapshotListItem from "./components/SnapshotListItem.vue";
 
+const queryClient = useQueryClient();
 const route = useRoute();
+const { t } = useI18n();
 
 const singlePageName = computed(() => route.query.name as string);
 
 const { data: singlePage } = useQuery({
   queryKey: ["singlePage-by-name", singlePageName],
   queryFn: async () => {
-    const { data } =
-      await apiClient.extension.singlePage.getcontentHaloRunV1alpha1SinglePage({
-        name: singlePageName.value,
-      });
+    const { data } = await coreApiClient.content.singlePage.getSinglePage({
+      name: singlePageName.value,
+    });
     return data;
   },
   enabled: computed(() => !!singlePageName.value),
@@ -34,9 +39,10 @@ const { data: singlePage } = useQuery({
 const { data: snapshots, isLoading } = useQuery({
   queryKey: ["singlePage-snapshots-by-singlePage-name", singlePageName],
   queryFn: async () => {
-    const { data } = await apiClient.singlePage.listSinglePageSnapshots({
-      name: singlePageName.value,
-    });
+    const { data } =
+      await consoleApiClient.content.singlePage.listSinglePageSnapshots({
+        name: singlePageName.value,
+      });
     return data;
   },
   refetchInterval(data) {
@@ -70,6 +76,43 @@ watch(
     immediate: true,
   }
 );
+
+function handleCleanup() {
+  Dialog.warning({
+    title: t("core.page_snapshots.operations.cleanup.title"),
+    description: t("core.page_snapshots.operations.cleanup.description"),
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
+    async onConfirm() {
+      const { releaseSnapshot, baseSnapshot, headSnapshot } =
+        singlePage.value?.spec || {};
+      const snapshotsToDelete = snapshots.value?.filter((snapshot) => {
+        const { name } = snapshot.metadata;
+        return ![releaseSnapshot, baseSnapshot, headSnapshot]
+          .filter(Boolean)
+          .includes(name);
+      });
+
+      if (!snapshotsToDelete?.length) {
+        Toast.info(t("core.page_snapshots.operations.cleanup.toast_empty"));
+        return;
+      }
+
+      for (let i = 0; i < snapshotsToDelete?.length; i++) {
+        await consoleApiClient.content.singlePage.deleteSinglePageContent({
+          name: singlePageName.value,
+          snapshotName: snapshotsToDelete[i].metadata.name,
+        });
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ["singlePage-snapshots-by-singlePage-name", singlePageName],
+      });
+
+      Toast.success(t("core.page_snapshots.operations.cleanup.toast_success"));
+    },
+  });
+}
 </script>
 
 <template>
@@ -78,9 +121,14 @@ watch(
       <IconHistoryLine class="mr-2 self-center" />
     </template>
     <template #actions>
-      <VButton size="sm" @click="$router.back()">
-        {{ $t("core.common.buttons.back") }}
-      </VButton>
+      <VSpace>
+        <VButton size="sm" @click="$router.back()">
+          {{ $t("core.common.buttons.back") }}
+        </VButton>
+        <VButton size="sm" type="danger" @click="handleCleanup">
+          {{ $t("core.page_snapshots.operations.cleanup.button") }}
+        </VButton>
+      </VSpace>
     </template>
   </VPageHeader>
 

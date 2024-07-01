@@ -1,4 +1,14 @@
 <script lang="ts" setup>
+import AnnotationsForm from "@/components/form/AnnotationsForm.vue";
+import { postLabels } from "@/constants/labels";
+import { FormType } from "@/types/slug";
+import { formatDatetime, toDatetimeLocal, toISOString } from "@/utils/date";
+import { randomUUID } from "@/utils/id";
+import useSlugify from "@console/composables/use-slugify";
+import { useThemeCustomTemplates } from "@console/modules/interface/themes/composables/use-theme";
+import { submitForm } from "@formkit/core";
+import type { Post } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
   IconRefreshLine,
   Toast,
@@ -6,22 +16,34 @@ import {
   VModal,
   VSpace,
 } from "@halo-dev/components";
-import { computed, nextTick, ref, toRaw, watch } from "vue";
-import type { Post } from "@halo-dev/api-client";
 import { cloneDeep } from "lodash-es";
-import { apiClient } from "@/utils/api-client";
-import { useThemeCustomTemplates } from "@console/modules/interface/themes/composables/use-theme";
-import { postLabels } from "@/constants/labels";
-import { randomUUID } from "@/utils/id";
-import { toDatetimeLocal, toISOString } from "@/utils/date";
-import AnnotationsForm from "@/components/form/AnnotationsForm.vue";
-import { submitForm } from "@formkit/core";
-import useSlugify from "@console/composables/use-slugify";
+import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { usePostUpdateMutate } from "../composables/use-post-update-mutate";
-import { FormType } from "@/types/slug";
 
-const initialFormState: Post = {
+const props = withDefaults(
+  defineProps<{
+    post?: Post;
+    publishSupport?: boolean;
+    onlyEmit?: boolean;
+  }>(),
+  {
+    post: undefined,
+    publishSupport: true,
+    onlyEmit: false,
+  }
+);
+
+const emit = defineEmits<{
+  (event: "close"): void;
+  (event: "saved", post: Post): void;
+  (event: "published", post: Post): void;
+}>();
+
+const { t } = useI18n();
+
+const modal = ref<InstanceType<typeof VModal>>();
+const formState = ref<Post>({
   spec: {
     title: "",
     slug: "",
@@ -47,34 +69,8 @@ const initialFormState: Post = {
   metadata: {
     name: randomUUID(),
   },
-};
-
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-    post?: Post;
-    publishSupport?: boolean;
-    onlyEmit?: boolean;
-  }>(),
-  {
-    visible: false,
-    post: undefined,
-    publishSupport: true,
-    onlyEmit: false,
-  }
-);
-
-const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
-  (event: "close"): void;
-  (event: "saved", post: Post): void;
-  (event: "published", post: Post): void;
-}>();
-
-const { t } = useI18n();
-
-const formState = ref<Post>(cloneDeep(initialFormState));
-const saving = ref(false);
+});
+const isSubmitting = ref(false);
 const publishing = ref(false);
 const publishCanceling = ref(false);
 const submitType = ref<"publish" | "save">();
@@ -83,13 +79,6 @@ const publishTime = ref<string | undefined>(undefined);
 const isUpdateMode = computed(() => {
   return !!formState.value.metadata.creationTimestamp;
 });
-
-const handleVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
 
 const handleSubmit = () => {
   if (submitType.value === "publish") {
@@ -139,41 +128,45 @@ const handleSave = async () => {
 
   if (props.onlyEmit) {
     emit("saved", formState.value);
+    modal.value?.close();
     return;
   }
 
   try {
-    saving.value = true;
+    isSubmitting.value = true;
 
     const { data } = isUpdateMode.value
       ? await postUpdateMutate(formState.value)
-      : await apiClient.extension.post.createcontentHaloRunV1alpha1Post({
+      : await coreApiClient.content.post.createPost({
           post: formState.value,
         });
 
     formState.value = data;
     emit("saved", data);
 
-    handleVisibleChange(false);
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.save_success"));
   } catch (e) {
     console.error("Failed to save post", e);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 
 const handlePublish = async () => {
   if (props.onlyEmit) {
     emit("published", formState.value);
+    modal.value?.close();
     return;
   }
 
   try {
     publishing.value = true;
 
-    const { data } = await apiClient.post.publishPost({
+    await postUpdateMutate(formState.value);
+
+    const { data } = await consoleApiClient.content.post.publishPost({
       name: formState.value.metadata.name,
     });
 
@@ -181,7 +174,7 @@ const handlePublish = async () => {
 
     emit("published", data);
 
-    handleVisibleChange(false);
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.publish_success"));
   } catch (e) {
@@ -195,11 +188,11 @@ const handleUnpublish = async () => {
   try {
     publishCanceling.value = true;
 
-    await apiClient.post.unpublishPost({
+    await consoleApiClient.content.post.unpublishPost({
       name: formState.value.metadata.name,
     });
 
-    handleVisibleChange(false);
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.cancel_publish_success"));
   } catch (e) {
@@ -209,11 +202,12 @@ const handleUnpublish = async () => {
   }
 };
 
+// publish time
 watch(
   () => props.post,
   (value) => {
     if (value) {
-      formState.value = toRaw(value);
+      formState.value = cloneDeep(value);
       publishTime.value = toDatetimeLocal(formState.value.spec.publishTime);
     }
   },
@@ -228,6 +222,21 @@ watch(
     formState.value.spec.publishTime = value ? toISOString(value) : undefined;
   }
 );
+
+const isScheduledPublish = computed(() => {
+  return (
+    formState.value.spec.publishTime &&
+    new Date(formState.value.spec.publishTime) > new Date()
+  );
+});
+
+const publishTimeHelp = computed(() => {
+  return isScheduledPublish.value
+    ? t("core.post.settings.fields.publish_time.help.schedule_publish", {
+        datetime: formatDatetime(publishTime.value),
+      })
+    : "";
+});
 
 // custom templates
 const { templates } = useThemeCustomTemplates("post");
@@ -248,14 +257,37 @@ const { handleGenerateSlug } = useSlugify(
   computed(() => !isUpdateMode.value),
   FormType.POST
 );
+
+// Buttons condition
+const showPublishButton = computed(() => {
+  if (!props.publishSupport) {
+    return false;
+  }
+
+  const {
+    [postLabels.PUBLISHED]: published,
+    [postLabels.SCHEDULING_PUBLISH]: schedulingPublish,
+  } = formState.value.metadata.labels || {};
+
+  return published !== "true" && schedulingPublish !== "true";
+});
+
+const showCancelPublishButton = computed(() => {
+  const {
+    [postLabels.PUBLISHED]: published,
+    [postLabels.SCHEDULING_PUBLISH]: schedulingPublish,
+  } = formState.value.metadata.labels || {};
+
+  return published === "true" || schedulingPublish === "true";
+});
 </script>
 <template>
   <VModal
-    :visible="visible"
+    ref="modal"
     :width="700"
     :title="$t('core.post.settings.title')"
     :centered="false"
-    @update:visible="handleVisibleChange"
+    @close="emit('close')"
   >
     <template #actions>
       <slot name="actions"></slot>
@@ -360,6 +392,11 @@ const { handleGenerateSlug } = useSlugify(
           </div>
           <div class="mt-5 divide-y divide-gray-100 md:col-span-3 md:mt-0">
             <FormKit
+              v-model="formState.spec.owner"
+              :label="$t('core.post.settings.fields.owner.label')"
+              type="userSelect"
+            ></FormKit>
+            <FormKit
               v-model="formState.spec.allowComment"
               :options="[
                 { label: $t('core.common.radio.yes'), value: true },
@@ -397,6 +434,7 @@ const { handleGenerateSlug } = useSlugify(
               type="datetime-local"
               min="0000-01-01T00:00"
               max="9999-12-31T23:59"
+              :help="publishTimeHelp"
             ></FormKit>
             <FormKit
               v-model="formState.spec.template"
@@ -442,32 +480,41 @@ const { handleGenerateSlug } = useSlugify(
     </div>
 
     <template #footer>
-      <VSpace>
-        <template v-if="publishSupport">
+      <div class="flex items-center justify-between">
+        <VSpace>
           <VButton
-            v-if="formState.metadata.labels?.[postLabels.PUBLISHED] !== 'true'"
+            v-if="showPublishButton"
             :loading="publishing"
             type="secondary"
             @click="handlePublishClick()"
           >
-            {{ $t("core.common.buttons.publish") }}
+            {{
+              isScheduledPublish
+                ? $t("core.common.buttons.schedule_publish")
+                : $t("core.common.buttons.publish")
+            }}
           </VButton>
           <VButton
-            v-else
-            :loading="publishCanceling"
-            type="danger"
-            @click="handleUnpublish()"
+            :loading="isSubmitting"
+            type="secondary"
+            @click="handleSaveClick()"
           >
-            {{ $t("core.common.buttons.cancel_publish") }}
+            {{ $t("core.common.buttons.save") }}
           </VButton>
-        </template>
-        <VButton :loading="saving" type="secondary" @click="handleSaveClick()">
-          {{ $t("core.common.buttons.save") }}
+          <VButton type="default" @click="modal?.close()">
+            {{ $t("core.common.buttons.close") }}
+          </VButton>
+        </VSpace>
+
+        <VButton
+          v-if="showCancelPublishButton"
+          :loading="publishCanceling"
+          type="danger"
+          @click="handleUnpublish()"
+        >
+          {{ $t("core.common.buttons.cancel_publish") }}
         </VButton>
-        <VButton type="default" @click="handleVisibleChange(false)">
-          {{ $t("core.common.buttons.close") }}
-        </VButton>
-      </VSpace>
+      </div>
     </template>
   </VModal>
 </template>

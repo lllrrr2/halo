@@ -9,6 +9,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.CredentialsContainer;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.web.server.authentication.AuthenticationWebFilter;
@@ -17,24 +18,28 @@ import org.springframework.security.web.server.context.ServerSecurityContextRepo
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
-import run.halo.app.security.authentication.login.HaloUser;
+import run.halo.app.security.HaloUserDetails;
+import run.halo.app.security.LoginHandlerEnhancer;
 import run.halo.app.security.authentication.login.UsernamePasswordHandler;
 import run.halo.app.security.authentication.twofactor.TwoFactorAuthentication;
 
 @Slf4j
 public class TotpAuthenticationFilter extends AuthenticationWebFilter {
 
-    public TotpAuthenticationFilter(ServerSecurityContextRepository securityContextRepository,
+    public TotpAuthenticationFilter(
+        ServerSecurityContextRepository securityContextRepository,
         TotpAuthService totpAuthService,
         ServerResponse.Context context,
-        MessageSource messageSource) {
+        MessageSource messageSource,
+        LoginHandlerEnhancer loginHandlerEnhancer
+    ) {
         super(new TwoFactorAuthManager(totpAuthService));
 
         setSecurityContextRepository(securityContextRepository);
         setRequiresAuthenticationMatcher(pathMatchers(HttpMethod.POST, "/login/2fa/totp"));
         setServerAuthenticationConverter(new TotpCodeAuthenticationConverter());
 
-        var handler = new UsernamePasswordHandler(context, messageSource);
+        var handler = new UsernamePasswordHandler(context, messageSource, loginHandlerEnhancer);
         setAuthenticationSuccessHandler(handler);
         setAuthenticationFailureHandler(handler);
     }
@@ -94,36 +99,38 @@ public class TotpAuthenticationFilter extends AuthenticationWebFilter {
             // it should be TotpAuthenticationToken
             var code = (Integer) authentication.getCredentials();
             log.debug("Got TOTP code {}", code);
+
             // get user details
             return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
                 .cast(TwoFactorAuthentication.class)
                 .map(TwoFactorAuthentication::getPrevious)
-                .<Authentication>handle((prevAuth, sink) -> {
-                    var principal = prevAuth.getPrincipal();
-                    if (!(principal instanceof HaloUser haloUser)) {
-                        sink.error(new TwoFactorAuthException("Invalid MFA authentication."));
-                        return;
+                .flatMap(previousAuth -> {
+                    var principal = previousAuth.getPrincipal();
+                    if (!(principal instanceof HaloUserDetails user)) {
+                        return Mono.error(
+                            new TwoFactorAuthException("Invalid authentication principal.")
+                        );
                     }
-                    var encryptedSecret =
-                        haloUser.getDelegate().getSpec().getTotpEncryptedSecret();
-                    if (StringUtils.isBlank(encryptedSecret)) {
-                        sink.error(new TwoFactorAuthException("Empty secret configured"));
-                        return;
+                    var totpEncryptedSecret = user.getTotpEncryptedSecret();
+                    if (StringUtils.isBlank(totpEncryptedSecret)) {
+                        return Mono.error(
+                            new TwoFactorAuthException("TOTP secret not configured.")
+                        );
                     }
-                    var rawSecret = totpAuthService.decryptSecret(encryptedSecret);
+                    var rawSecret = totpAuthService.decryptSecret(totpEncryptedSecret);
                     var validated = totpAuthService.validateTotp(rawSecret, code);
                     if (!validated) {
-                        sink.error(new TwoFactorAuthException("Invalid TOTP code " + code));
-                        return;
+                        return Mono.error(new TwoFactorAuthException("Invalid TOTP code " + code));
                     }
-                    sink.next(prevAuth);
-                })
-                .doOnNext(previousAuth -> {
                     if (log.isDebugEnabled()) {
                         log.debug("TOTP authentication for {} with code {} successfully.",
                             previousAuth.getName(), code);
                     }
+                    if (previousAuth instanceof CredentialsContainer container) {
+                        container.eraseCredentials();
+                    }
+                    return Mono.just(previousAuth);
                 });
         }
     }

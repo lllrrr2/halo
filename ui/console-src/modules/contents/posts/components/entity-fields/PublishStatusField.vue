@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import { VEntityField, VStatusDot } from "@halo-dev/components";
-import type { ListedPost } from "@halo-dev/api-client";
 import { postLabels } from "@/constants/labels";
+import type { ListedPost } from "@halo-dev/api-client";
+import { VEntityField, VStatusDot } from "@halo-dev/components";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -22,10 +22,11 @@ const publishStatus = computed(() => {
 });
 
 const isPublishing = computed(() => {
-  const { spec, status, metadata } = props.post.post;
+  const { spec, metadata } = props.post.post;
   return (
-    (spec.publish && metadata.labels?.[postLabels.PUBLISHED] !== "true") ||
-    (spec.releaseSnapshot === spec.headSnapshot && status?.inProgress)
+    spec.publish &&
+    metadata.labels?.[postLabels.PUBLISHED] !== "true" &&
+    metadata.labels?.[postLabels.SCHEDULING_PUBLISH] !== "true"
   );
 });
 </script>

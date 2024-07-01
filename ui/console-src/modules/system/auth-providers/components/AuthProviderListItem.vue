@@ -1,8 +1,9 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
 import type { ListedAuthProvider } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
   Dialog,
+  IconList,
   IconSettings,
   Toast,
   VAvatar,
@@ -32,13 +33,13 @@ const handleChangeStatus = async () => {
     onConfirm: async () => {
       try {
         if (props.authProvider.enabled) {
-          await apiClient.authProvider.disableAuthProvider({
+          await consoleApiClient.auth.authProvider.disableAuthProvider({
             name: props.authProvider.name,
           });
 
           Toast.success(t("core.common.toast.inactive_success"));
         } else {
-          await apiClient.authProvider.enableAuthProvider({
+          await consoleApiClient.auth.authProvider.enableAuthProvider({
             name: props.authProvider.name,
           });
           Toast.success(t("core.common.toast.active_success"));
@@ -55,6 +56,13 @@ const handleChangeStatus = async () => {
 
 <template>
   <VEntity>
+    <template #prepend>
+      <div
+        class="drag-element absolute inset-y-0 left-0 hidden w-3.5 cursor-move items-center bg-gray-100 transition-all hover:bg-gray-200 group-hover:flex"
+      >
+        <IconList class="h-3.5 w-3.5" />
+      </div>
+    </template>
     <template #start>
       <VEntityField>
         <template #description>

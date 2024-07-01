@@ -22,9 +22,15 @@ export enum contentAnnotations {
   PATCHED_CONTENT = "content.halo.run/patched-content",
   PATCHED_RAW = "content.halo.run/patched-raw",
   CONTENT_JSON = "content.halo.run/content-json",
+  SCHEDULED_PUBLISH_AT = "content.halo.run/scheduled-publish-at",
 }
 
 // pat
 export enum patAnnotations {
   ACCESS_TOKEN = "security.halo.run/access-token",
+}
+
+// Secret
+export enum secretAnnotations {
+  DESCRIPTION = "secret.halo.run/description",
 }

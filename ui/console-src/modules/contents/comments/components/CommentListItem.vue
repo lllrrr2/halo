@@ -1,21 +1,7 @@
 <script lang="ts" setup>
-import {
-  Dialog,
-  VAvatar,
-  VButton,
-  VEntity,
-  VEntityField,
-  VStatusDot,
-  VSpace,
-  VEmpty,
-  IconAddCircle,
-  IconExternalLinkLine,
-  VLoading,
-  Toast,
-  VDropdownItem,
-  VTag,
-} from "@halo-dev/components";
-import ReplyCreationModal from "./ReplyCreationModal.vue";
+import { usePluginModuleStore } from "@/stores/plugin";
+import { formatDatetime } from "@/utils/date";
+import { usePermission } from "@/utils/permission";
 import type {
   Extension,
   ListedComment,
@@ -23,20 +9,32 @@ import type {
   Post,
   SinglePage,
 } from "@halo-dev/api-client";
-import { formatDatetime } from "@/utils/date";
-import { computed, provide, ref, onMounted, type Ref } from "vue";
-import ReplyListItem from "./ReplyListItem.vue";
-import { apiClient } from "@/utils/api-client";
-import { cloneDeep } from "lodash-es";
-import { usePermission } from "@/utils/permission";
-import { useQuery, useQueryClient } from "@tanstack/vue-query";
-import { useI18n } from "vue-i18n";
-import { usePluginModuleStore } from "@/stores/plugin";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
+import {
+  Dialog,
+  IconAddCircle,
+  IconExternalLinkLine,
+  Toast,
+  VAvatar,
+  VButton,
+  VDropdownItem,
+  VEmpty,
+  VEntity,
+  VEntityField,
+  VLoading,
+  VSpace,
+  VStatusDot,
+  VTag,
+} from "@halo-dev/components";
 import type {
-  PluginModule,
   CommentSubjectRefProvider,
   CommentSubjectRefResult,
 } from "@halo-dev/console-shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { computed, onMounted, provide, ref, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
+import ReplyCreationModal from "./ReplyCreationModal.vue";
+import ReplyListItem from "./ReplyListItem.vue";
 
 const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
@@ -48,12 +46,10 @@ const props = withDefaults(
     isSelected?: boolean;
   }>(),
   {
-    comment: undefined,
     isSelected: false,
   }
 );
 
-const selectedReply = ref<ListedReply>();
 const hoveredReply = ref<ListedReply>();
 const showReplies = ref(false);
 const replyModal = ref(false);
@@ -69,7 +65,7 @@ const handleDelete = async () => {
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
       try {
-        await apiClient.extension.comment.deletecontentHaloRunV1alpha1Comment({
+        await coreApiClient.content.comment.deleteComment({
           name: props.comment?.comment?.metadata.name as string,
         });
 
@@ -94,17 +90,21 @@ const handleApproveReplyInBatch = async () => {
           return !reply.reply.spec.approved;
         });
         const promises = repliesToUpdate?.map((reply) => {
-          return apiClient.extension.reply.updatecontentHaloRunV1alpha1Reply({
+          return coreApiClient.content.reply.patchReply({
             name: reply.reply.metadata.name,
-            reply: {
-              ...reply.reply,
-              spec: {
-                ...reply.reply.spec,
-                approved: true,
-                // TODO: 暂时由前端设置发布时间。see https://github.com/halo-dev/halo/pull/2746
-                approvedTime: new Date().toISOString(),
+            jsonPatchInner: [
+              {
+                op: "add",
+                path: "/spec/approved",
+                value: true,
               },
-            },
+              {
+                op: "add",
+                path: "/spec/approvedTime",
+                // TODO: 暂时由前端设置发布时间。see https://github.com/halo-dev/halo/pull/2746
+                value: new Date().toISOString(),
+              },
+            ],
           });
         });
         await Promise.all(promises || []);
@@ -121,13 +121,21 @@ const handleApproveReplyInBatch = async () => {
 
 const handleApprove = async () => {
   try {
-    const commentToUpdate = cloneDeep(props.comment.comment);
-    commentToUpdate.spec.approved = true;
-    // TODO: 暂时由前端设置发布时间。see https://github.com/halo-dev/halo/pull/2746
-    commentToUpdate.spec.approvedTime = new Date().toISOString();
-    await apiClient.extension.comment.updatecontentHaloRunV1alpha1Comment({
-      name: commentToUpdate.metadata.name,
-      comment: commentToUpdate,
+    await coreApiClient.content.comment.patchComment({
+      name: props.comment.comment.metadata.name,
+      jsonPatchInner: [
+        {
+          op: "add",
+          path: "/spec/approved",
+          value: true,
+        },
+        {
+          op: "add",
+          path: "/spec/approvedTime",
+          // TODO: 暂时由前端设置发布时间。see https://github.com/halo-dev/halo/pull/2746
+          value: new Date().toISOString(),
+        },
+      ],
     });
 
     Toast.success(t("core.common.toast.operation_success"));
@@ -149,7 +157,7 @@ const {
     showReplies,
   ],
   queryFn: async () => {
-    const { data } = await apiClient.reply.listReplies({
+    const { data } = await consoleApiClient.content.reply.listReplies({
       commentName: props.comment.comment.metadata.name,
       page: 0,
       size: 0,
@@ -165,40 +173,46 @@ const {
   enabled: computed(() => showReplies.value),
 });
 
+const { mutateAsync: updateCommentLastReadTimeMutate } = useMutation({
+  mutationKey: ["update-comment-last-read-time"],
+  mutationFn: async () => {
+    return coreApiClient.content.comment.patchComment(
+      {
+        name: props.comment.comment.metadata.name,
+        jsonPatchInner: [
+          {
+            op: "add",
+            path: "/spec/lastReadTime",
+            value: new Date().toISOString(),
+          },
+        ],
+      },
+      {
+        mute: true,
+      }
+    );
+  },
+  retry: 3,
+});
+
 const handleToggleShowReplies = async () => {
   showReplies.value = !showReplies.value;
-  if (showReplies.value) {
-    // update last read time
-    if (props.comment.comment.status?.unreadReplyCount) {
-      const commentToUpdate = cloneDeep(props.comment.comment);
-      commentToUpdate.spec.lastReadTime = new Date().toISOString();
-      await apiClient.extension.comment.updatecontentHaloRunV1alpha1Comment({
-        name: commentToUpdate.metadata.name,
-        comment: commentToUpdate,
-      });
-    }
-  } else {
-    queryClient.invalidateQueries({ queryKey: ["comments"] });
+
+  if (props.comment.comment.status?.unreadReplyCount) {
+    await updateCommentLastReadTimeMutate();
   }
-};
 
-const handleTriggerReply = () => {
-  replyModal.value = true;
-};
-
-const onTriggerReply = (reply: ListedReply) => {
-  selectedReply.value = reply;
-  replyModal.value = true;
+  queryClient.invalidateQueries({ queryKey: ["comments"] });
 };
 
 const onReplyCreationModalClose = () => {
-  selectedReply.value = undefined;
-
   queryClient.invalidateQueries({ queryKey: ["comments"] });
 
   if (showReplies.value) {
     refetch();
   }
+
+  replyModal.value = false;
 };
 
 // Subject ref processing
@@ -241,25 +255,21 @@ const SubjectRefProviders = ref<CommentSubjectRefProvider[]>([
   },
 ]);
 
+const { pluginModules } = usePluginModuleStore();
+
 onMounted(() => {
-  const { pluginModules } = usePluginModuleStore();
+  for (const pluginModule of pluginModules) {
+    const callbackFunction =
+      pluginModule?.extensionPoints?.["comment:subject-ref:create"];
 
-  pluginModules.forEach((pluginModule: PluginModule) => {
-    const { extensionPoints } = pluginModule;
-    if (!extensionPoints?.["comment:subject-ref:create"]) {
-      return;
+    if (typeof callbackFunction !== "function") {
+      continue;
     }
 
-    const providers = extensionPoints[
-      "comment:subject-ref:create"
-    ]() as CommentSubjectRefProvider[];
+    const providers = callbackFunction();
 
-    if (providers) {
-      providers.forEach((provider) => {
-        SubjectRefProviders.value.push(provider);
-      });
-    }
-  });
+    SubjectRefProviders.value.push(...providers);
+  }
 });
 
 const subjectRefResult = computed(() => {
@@ -287,10 +297,8 @@ const subjectRefResult = computed(() => {
 
 <template>
   <ReplyCreationModal
-    :key="comment?.comment.metadata.name"
-    v-model:visible="replyModal"
+    v-if="replyModal"
     :comment="comment"
-    :reply="selectedReply"
     @close="onReplyCreationModalClose"
   />
   <VEntity :is-selected="isSelected" :class="{ 'hover:bg-white': showReplies }">
@@ -364,7 +372,7 @@ const subjectRefResult = computed(() => {
               />
               <span
                 class="select-none text-gray-700 hover:text-gray-900"
-                @click="handleTriggerReply"
+                @click="replyModal = true"
               >
                 {{ $t("core.comment.operations.reply.button") }}
               </span>
@@ -458,8 +466,8 @@ const subjectRefResult = computed(() => {
               :key="reply.reply.metadata.name"
               :class="{ 'hover:bg-white': showReplies }"
               :reply="reply"
+              :comment="comment"
               :replies="replies"
-              @reply="onTriggerReply"
             ></ReplyListItem>
           </div>
         </Transition>

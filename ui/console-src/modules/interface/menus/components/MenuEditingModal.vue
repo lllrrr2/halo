@@ -1,34 +1,34 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
 import SubmitButton from "@/components/button/SubmitButton.vue";
-import type { Menu } from "@halo-dev/api-client";
-import { computed, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-import { reset } from "@formkit/core";
-import { cloneDeep } from "lodash-es";
 import { setFocus } from "@/formkit/utils/focus";
+import type { Menu } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { useQueryClient } from "@tanstack/vue-query";
+import { cloneDeep } from "lodash-es";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
     menu?: Menu;
   }>(),
   {
-    visible: false,
     menu: undefined,
   }
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
   (event: "created", menu: Menu): void;
 }>();
 
+const queryClient = useQueryClient();
 const { t } = useI18n();
 
-const initialFormState: Menu = {
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+
+const formState = ref<Menu>({
   spec: {
     displayName: "",
     menuItems: [],
@@ -39,36 +39,32 @@ const initialFormState: Menu = {
     name: "",
     generateName: "menu-",
   },
-};
+});
 
-const formState = ref<Menu>(cloneDeep(initialFormState));
 const saving = ref(false);
 
-const isUpdateMode = computed(() => {
-  return !!formState.value.metadata.creationTimestamp;
-});
+const modalTitle = props.menu
+  ? t("core.menu.menu_editing_modal.titles.update")
+  : t("core.menu.menu_editing_modal.titles.create");
 
-const modalTitle = computed(() => {
-  return isUpdateMode.value
-    ? t("core.menu.menu_editing_modal.titles.update")
-    : t("core.menu.menu_editing_modal.titles.create");
-});
-
-const handleCreateMenu = async () => {
+const handleSaveMenu = async () => {
   try {
     saving.value = true;
-    if (isUpdateMode.value) {
-      await apiClient.extension.menu.updatev1alpha1Menu({
+    if (props.menu) {
+      await coreApiClient.menu.updateMenu({
         name: formState.value.metadata.name,
         menu: formState.value,
       });
     } else {
-      const { data } = await apiClient.extension.menu.createv1alpha1Menu({
+      const { data } = await coreApiClient.menu.createMenu({
         menu: formState.value,
       });
       emit("created", data);
     }
-    onVisibleChange(false);
+
+    queryClient.invalidateQueries({ queryKey: ["menus"] });
+
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.save_success"));
   } catch (e) {
@@ -78,53 +74,21 @@ const handleCreateMenu = async () => {
   }
 };
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
+onMounted(() => {
+  if (props.menu) {
+    formState.value = cloneDeep(props.menu);
   }
-};
-
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("menu-form");
-};
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      setFocus("menuDisplayNameInput");
-    } else {
-      handleResetForm();
-    }
-  }
-);
-
-watch(
-  () => props.menu,
-  (menu) => {
-    if (menu) {
-      formState.value = cloneDeep(menu);
-    } else {
-      handleResetForm();
-    }
-  }
-);
+  setFocus("menuDisplayNameInput");
+});
 </script>
 <template>
-  <VModal
-    :visible="visible"
-    :width="500"
-    :title="modalTitle"
-    @update:visible="onVisibleChange"
-  >
+  <VModal ref="modal" :width="500" :title="modalTitle" @close="emit('close')">
     <FormKit
       id="menu-form"
       name="menu-form"
       type="form"
       :config="{ validationVisibility: 'submit' }"
-      @submit="handleCreateMenu"
+      @submit="handleSaveMenu"
     >
       <FormKit
         id="menuDisplayNameInput"
@@ -138,14 +102,13 @@ watch(
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
           :loading="saving"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('menu-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

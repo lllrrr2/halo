@@ -1,11 +1,11 @@
 <script lang="ts" setup>
+import { i18n } from "@/locales";
+import type { Payload } from "@ckpack/vue-color";
+import { Sketch } from "@ckpack/vue-color";
 import { Dropdown as VDropdown } from "floating-vue";
+import tailwindcssColors from "tailwindcss/colors";
 import MdiChevronRight from "~icons/mdi/chevron-right";
 import MdiPalette from "~icons/mdi/palette";
-import { Sketch } from "@ckpack/vue-color";
-import type { Payload } from "@ckpack/vue-color";
-import tailwindcssColors from "tailwindcss/colors";
-import { i18n } from "@/locales";
 
 interface Color {
   color: string;
@@ -78,7 +78,7 @@ function onColorChange(color: Payload) {
 </script>
 
 <template>
-  <VDropdown class="inline-flex">
+  <VDropdown class="inline-flex items-center">
     <slot />
     <template #popper>
       <slot name="prefix" />

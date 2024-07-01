@@ -1,13 +1,13 @@
 import { i18n } from "@/locales";
+import { usePluginModuleStore } from "@/stores/plugin";
+import { loadStyle } from "@/utils/load-style";
 import modules from "@console/modules";
 import router from "@console/router";
-import { usePluginModuleStore } from "@/stores/plugin";
+import { Toast } from "@halo-dev/components";
 import type { PluginModule, RouteRecordAppend } from "@halo-dev/console-shared";
 import { useScriptTag } from "@vueuse/core";
-import { Toast } from "@halo-dev/components";
 import type { App } from "vue";
 import type { RouteRecordRaw } from "vue-router";
-import { loadStyle } from "@/utils/load-style";
 
 export function setupCoreModules(app: App) {
   modules.forEach((module) => {
@@ -19,9 +19,7 @@ export async function setupPluginModules(app: App) {
   const pluginModuleStore = usePluginModuleStore();
   try {
     const { load } = useScriptTag(
-      `${
-        import.meta.env.VITE_API_URL
-      }/apis/api.console.halo.run/v1alpha1/plugins/-/bundle.js?t=${Date.now()}`
+      `/apis/api.console.halo.run/v1alpha1/plugins/-/bundle.js?t=${Date.now()}`
     );
 
     await load();
@@ -43,9 +41,7 @@ export async function setupPluginModules(app: App) {
 
   try {
     await loadStyle(
-      `${
-        import.meta.env.VITE_API_URL
-      }/apis/api.console.halo.run/v1alpha1/plugins/-/bundle.css?t=${Date.now()}`
+      `/apis/api.console.halo.run/v1alpha1/plugins/-/bundle.css?t=${Date.now()}`
     );
   } catch (e) {
     const message = i18n.global.t("core.plugin.loader.toast.style_load_failed");

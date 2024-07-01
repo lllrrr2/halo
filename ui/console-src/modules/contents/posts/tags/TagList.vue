@@ -1,33 +1,32 @@
 <script lang="ts" setup>
+import FilterCleanButton from "@/components/filter/FilterCleanButton.vue";
+import SearchInput from "@/components/input/SearchInput.vue";
+import HasPermission from "@/components/permission/HasPermission.vue";
 import type { Tag } from "@halo-dev/api-client";
-import { onMounted, ref, watch } from "vue";
+import { coreApiClient } from "@halo-dev/api-client";
 import {
   IconAddCircle,
   IconBookRead,
+  IconRefreshLine,
   VButton,
   VCard,
   VEmpty,
-  VPageHeader,
-  VSpace,
   VLoading,
+  VPageHeader,
   VPagination,
-  IconRefreshLine,
+  VSpace,
 } from "@halo-dev/components";
-import HasPermission from "@/components/permission/HasPermission.vue";
-import TagEditingModal from "./components/TagEditingModal.vue";
 import { useRouteQuery } from "@vueuse/router";
-import { apiClient } from "@/utils/api-client";
-import { usePostTag } from "./composables/use-post-tag";
-import TagListItem from "./components/TagListItem.vue";
-import SearchInput from "@/components/input/SearchInput.vue";
-import FilterCleanButton from "@/components/filter/FilterCleanButton.vue";
-import { computed } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import TagEditingModal from "./components/TagEditingModal.vue";
+import TagListItem from "./components/TagListItem.vue";
+import { usePostTag } from "./composables/use-post-tag";
 
 const { t } = useI18n();
 
 const editingModal = ref(false);
-const selectedTag = ref<Tag | null>(null);
+const selectedTag = ref<Tag>();
 
 const selectedTagNames = ref<string[]>([]);
 const checkedAll = ref(false);
@@ -66,7 +65,7 @@ const {
   sort: selectedSort,
 });
 
-const handleOpenEditingModal = (tag: Tag | null) => {
+const handleOpenEditingModal = (tag?: Tag) => {
   selectedTag.value = tag;
   editingModal.value = true;
 };
@@ -132,8 +131,9 @@ const handleSelectNext = async () => {
 };
 
 const onEditingModalClose = () => {
-  selectedTag.value = null;
+  selectedTag.value = undefined;
   queryName.value = null;
+  editingModal.value = false;
   handleFetchTags();
 };
 
@@ -141,11 +141,9 @@ const queryName = useRouteQuery("name");
 
 onMounted(async () => {
   if (queryName.value) {
-    const { data } = await apiClient.extension.tag.getcontentHaloRunV1alpha1Tag(
-      {
-        name: queryName.value as string,
-      }
-    );
+    const { data } = await coreApiClient.content.tag.getTag({
+      name: queryName.value as string,
+    });
     selectedTag.value = data;
     editingModal.value = true;
   }
@@ -157,7 +155,7 @@ watch(selectedTagNames, (newVal) => {
 </script>
 <template>
   <TagEditingModal
-    v-model:visible="editingModal"
+    v-if="editingModal"
     :tag="selectedTag"
     @close="onEditingModalClose"
     @next="handleSelectNext"

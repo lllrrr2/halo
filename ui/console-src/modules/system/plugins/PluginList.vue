@@ -1,9 +1,16 @@
 <script lang="ts" setup>
+import { usePermission } from "@/utils/permission";
+import {
+  PluginStatusPhaseEnum,
+  consoleApiClient,
+  type Plugin,
+} from "@halo-dev/api-client";
 import {
   Dialog,
   IconAddCircle,
   IconPlug,
   IconRefreshLine,
+  IconSettings,
   VButton,
   VCard,
   VDropdown,
@@ -13,16 +20,13 @@ import {
   VPageHeader,
   VSpace,
 } from "@halo-dev/components";
-import PluginListItem from "./components/PluginListItem.vue";
-import PluginInstallationModal from "./components/PluginInstallationModal.vue";
+import { useQuery } from "@tanstack/vue-query";
+import { useRouteQuery } from "@vueuse/router";
 import type { Ref } from "vue";
 import { computed, onMounted, provide, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-import { usePermission } from "@/utils/permission";
-import { useQuery } from "@tanstack/vue-query";
-import { PluginStatusPhaseEnum, type Plugin } from "@halo-dev/api-client";
 import { useI18n } from "vue-i18n";
-import { useRouteQuery } from "@vueuse/router";
+import PluginInstallationModal from "./components/PluginInstallationModal.vue";
+import PluginListItem from "./components/PluginListItem.vue";
 import { usePluginBatchOperations } from "./composables/use-plugin";
 
 const { t } = useI18n();
@@ -30,10 +34,17 @@ const { currentUserHasPermission } = usePermission();
 
 const pluginInstallationModalVisible = ref(false);
 
-const keyword = ref("");
+const keyword = useRouteQuery<string>("keyword", "");
 
-const selectedEnabledValue = ref();
-const selectedSortValue = ref();
+const selectedEnabledValue = useRouteQuery<
+  string | undefined,
+  boolean | undefined
+>("enabled", undefined, {
+  transform: (value) => {
+    return value ? value === "true" : undefined;
+  },
+});
+const selectedSortValue = useRouteQuery<string | undefined>("sort");
 
 const hasFilters = computed(() => {
   return selectedEnabledValue.value !== undefined || selectedSortValue.value;
@@ -49,7 +60,7 @@ const total = ref(0);
 const { data, isLoading, isFetching, refetch } = useQuery<Plugin[]>({
   queryKey: ["plugins", keyword, selectedEnabledValue, selectedSortValue],
   queryFn: async () => {
-    const { data } = await apiClient.plugin.listPlugins({
+    const { data } = await consoleApiClient.plugin.plugin.listPlugins({
       page: 0,
       size: 0,
       keyword: keyword.value,
@@ -150,16 +161,30 @@ onMounted(() => {
       <IconPlug class="mr-2 self-center" />
     </template>
     <template #actions>
-      <VButton
-        v-permission="['system:plugins:manage']"
-        type="secondary"
-        @click="pluginInstallationModalVisible = true"
-      >
-        <template #icon>
-          <IconAddCircle class="h-full w-full" />
-        </template>
-        {{ $t("core.common.buttons.install") }}
-      </VButton>
+      <VSpace>
+        <HasPermission :permissions="['*']">
+          <VButton
+            size="sm"
+            @click="$router.push({ name: 'PluginExtensionPointSettings' })"
+          >
+            <template #icon>
+              <IconSettings class="h-full w-full" />
+            </template>
+            {{ $t("core.plugin.actions.extension-point-settings") }}
+          </VButton>
+        </HasPermission>
+
+        <VButton
+          v-permission="['system:plugins:manage']"
+          type="secondary"
+          @click="pluginInstallationModalVisible = true"
+        >
+          <template #icon>
+            <IconAddCircle class="h-full w-full" />
+          </template>
+          {{ $t("core.common.buttons.install") }}
+        </VButton>
+      </VSpace>
     </template>
   </VPageHeader>
 

@@ -1,90 +1,55 @@
 <script lang="ts" setup>
 // core libs
-import { ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
 import type { CreateUserRequest } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { onMounted, ref } from "vue";
 
 // components
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
 import SubmitButton from "@/components/button/SubmitButton.vue";
-
-// libs
-import { cloneDeep } from "lodash-es";
-import { reset } from "@formkit/core";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
 
 // hooks
 import { setFocus } from "@/formkit/utils/focus";
-import { useI18n } from "vue-i18n";
 import { useQueryClient } from "@tanstack/vue-query";
+import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const queryClient = useQueryClient();
 
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-  }>(),
-  {
-    visible: false,
-  }
-);
-
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const initialFormState: CreateUserRequest = {
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const formState = ref<CreateUserRequest>({
   avatar: "",
   bio: "",
   displayName: "",
   email: "",
   name: "",
   password: "",
-  phone: "",
   roles: [],
-};
-
-const formState = ref<CreateUserRequest>(cloneDeep(initialFormState));
+});
 const selectedRole = ref("");
-const saving = ref(false);
+const isSubmitting = ref(false);
 
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("user-creation-form");
-};
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      setFocus("creationUserNameInput");
-    } else {
-      handleResetForm();
-    }
-  }
-);
-
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
+onMounted(() => {
+  setFocus("creationUserNameInput");
+});
 
 const handleCreateUser = async () => {
   try {
-    saving.value = true;
+    isSubmitting.value = true;
 
     if (selectedRole.value) {
       formState.value.roles = [selectedRole.value];
     }
 
-    await apiClient.user.createUser({
+    await consoleApiClient.user.createUser({
       createUserRequest: formState.value,
     });
 
-    onVisibleChange(false);
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.save_success"));
 
@@ -92,16 +57,16 @@ const handleCreateUser = async () => {
   } catch (e) {
     console.error("Failed to create or update user", e);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 </script>
 <template>
   <VModal
+    ref="modal"
     :title="$t('core.user.editing_modal.titles.create')"
-    :visible="visible"
     :width="650"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <FormKit
       id="user-creation-form"
@@ -143,13 +108,6 @@ const handleCreateUser = async () => {
         validation="required|email|length:0,100"
       ></FormKit>
       <FormKit
-        v-model="formState.phone"
-        :label="$t('core.user.editing_modal.fields.phone.label')"
-        type="text"
-        name="phone"
-        validation="length:0,20"
-      ></FormKit>
-      <FormKit
         v-model="formState.password"
         :label="$t('core.user.change_password_modal.fields.new_password.label')"
         type="password"
@@ -177,14 +135,13 @@ const handleCreateUser = async () => {
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('user-creation-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

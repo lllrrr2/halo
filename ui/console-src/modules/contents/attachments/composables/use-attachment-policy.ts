@@ -1,7 +1,7 @@
-import type { Ref } from "vue";
 import type { Policy, PolicyTemplate } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
 import { useQuery } from "@tanstack/vue-query";
+import type { Ref } from "vue";
 
 interface useFetchAttachmentPolicyReturn {
   policies: Ref<Policy[] | undefined>;
@@ -19,15 +19,14 @@ export function useFetchAttachmentPolicy(): useFetchAttachmentPolicyReturn {
   const { data, isLoading, refetch } = useQuery<Policy[]>({
     queryKey: ["attachment-policies"],
     queryFn: async () => {
-      const { data } =
-        await apiClient.extension.storage.policy.liststorageHaloRunV1alpha1Policy();
+      const { data } = await coreApiClient.storage.policy.listPolicy();
       return data.items;
     },
     refetchInterval(data) {
-      const deletingPolicies = data?.filter(
+      const hasDeletingPolicy = data?.some(
         (policy) => !!policy.metadata.deletionTimestamp
       );
-      return deletingPolicies?.length ? 1000 : false;
+      return hasDeletingPolicy ? 1000 : false;
     },
   });
 
@@ -43,7 +42,7 @@ export function useFetchAttachmentPolicyTemplate(): useFetchAttachmentPolicyTemp
     queryKey: ["attachment-policy-templates"],
     queryFn: async () => {
       const { data } =
-        await apiClient.extension.storage.policyTemplate.liststorageHaloRunV1alpha1PolicyTemplate();
+        await coreApiClient.storage.policyTemplate.listPolicyTemplate();
       return data.items;
     },
   });

@@ -1,11 +1,15 @@
-import { mergeAttributes, Node } from "@/tiptap/vue-3";
+import { i18n } from "@/locales";
 import {
-  Plugin,
-  PluginKey,
+  addRowAfter,
   Decoration,
   DecorationSet,
-  addRowAfter,
+  Plugin,
+  PluginKey,
 } from "@/tiptap/pm";
+import { mergeAttributes, Node } from "@/tiptap/vue-3";
+import { Tooltip } from "floating-vue";
+import { h, render } from "vue";
+import MdiPlus from "~icons/mdi/plus";
 import {
   getCellsInColumn,
   isRowSelected,
@@ -13,11 +17,6 @@ import {
   selectRow,
   selectTable,
 } from "./util";
-import { Tooltip } from "floating-vue";
-import { h } from "vue";
-import MdiPlus from "~icons/mdi/plus";
-import { render } from "vue";
-import { i18n } from "@/locales";
 
 export interface TableCellOptions {
   HTMLAttributes: Record<string, any>;
@@ -28,6 +27,7 @@ const TableCell = Node.create<TableCellOptions>({
   content: "block+",
   tableRole: "cell",
   isolating: true,
+  fakeSelection: true,
 
   addOptions() {
     return {
@@ -58,7 +58,9 @@ const TableCell = Node.create<TableCellOptions>({
         default: [100],
         parseHTML: (element) => {
           const colwidth = element.getAttribute("colwidth");
-          const value = colwidth ? [parseInt(colwidth, 10)] : null;
+          const value = colwidth
+            ? colwidth.split(",").map((width) => parseInt(width, 10))
+            : null;
           return value;
         },
       },

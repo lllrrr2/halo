@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -19,6 +20,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 import run.halo.app.content.AbstractContentService;
+import run.halo.app.content.CategoryService;
 import run.halo.app.content.ContentRequest;
 import run.halo.app.content.ContentWrapper;
 import run.halo.app.content.Contributor;
@@ -35,6 +37,7 @@ import run.halo.app.core.extension.content.Tag;
 import run.halo.app.core.extension.service.UserService;
 import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
+import run.halo.app.extension.MetadataOperator;
 import run.halo.app.extension.PageRequestImpl;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Ref;
@@ -56,20 +59,23 @@ public class PostServiceImpl extends AbstractContentService implements PostServi
     private final ReactiveExtensionClient client;
     private final CounterService counterService;
     private final UserService userService;
+    private final CategoryService categoryService;
 
     public PostServiceImpl(ReactiveExtensionClient client, CounterService counterService,
-        UserService userService) {
+        UserService userService, CategoryService categoryService) {
         super(client);
         this.client = client;
         this.counterService = counterService;
         this.userService = userService;
+        this.categoryService = categoryService;
     }
 
     @Override
     public Mono<ListResult<ListedPost>> listPost(PostQuery query) {
-        return client.listBy(Post.class, query.toListOptions(),
+        return buildListOptions(query)
+            .flatMap(listOptions -> client.listBy(Post.class, listOptions,
                 PageRequestImpl.of(query.getPage(), query.getSize(), query.getSort())
-            )
+            ))
             .flatMap(listResult -> Flux.fromStream(listResult.get())
                 .map(this::getListedPost)
                 .concatMap(Function.identity())
@@ -79,6 +85,26 @@ public class PostServiceImpl extends AbstractContentService implements PostServi
                 )
                 .defaultIfEmpty(ListResult.emptyResult())
             );
+    }
+
+    Mono<ListOptions> buildListOptions(PostQuery query) {
+        var categoryName = query.getCategoryWithChildren();
+        if (categoryName == null) {
+            return Mono.just(query.toListOptions());
+        }
+        return categoryService.listChildren(categoryName)
+            .collectList()
+            .map(categories -> {
+                var categoryNames = categories.stream()
+                    .map(Category::getMetadata)
+                    .map(MetadataOperator::getName)
+                    .toList();
+                var listOptions = query.toListOptions();
+                var newFiledSelector = listOptions.getFieldSelector()
+                    .andQuery(in("spec.categories", categoryNames));
+                listOptions.setFieldSelector(newFiledSelector);
+                return listOptions;
+            });
     }
 
     Mono<Stats> fetchStats(Post post) {
@@ -328,9 +354,11 @@ public class PostServiceImpl extends AbstractContentService implements PostServi
             .flatMap(post -> {
                 var headSnapshotName = post.getSpec().getHeadSnapshot();
                 if (StringUtils.equals(headSnapshotName, snapshotName)) {
-                    // update head to release
-                    post.getSpec().setHeadSnapshot(post.getSpec().getReleaseSnapshot());
-                    return updatePostWithRetry(post);
+                    return updatePostWithRetry(post, record -> {
+                        // update head to release
+                        record.getSpec().setHeadSnapshot(record.getSpec().getReleaseSnapshot());
+                        return record;
+                    });
                 }
                 return Mono.just(post);
             })
@@ -352,14 +380,15 @@ public class PostServiceImpl extends AbstractContentService implements PostServi
             });
     }
 
-    private Mono<Post> updatePostWithRetry(Post post) {
-        return client.update(post)
+    private Mono<Post> updatePostWithRetry(Post post, UnaryOperator<Post> func) {
+        return client.update(func.apply(post))
             .onErrorResume(OptimisticLockingFailureException.class,
                 e -> Mono.defer(() -> client.get(Post.class, post.getMetadata().getName())
-                        .flatMap(client::update))
-                    .retryWhen(Retry.backoff(8, Duration.ofMillis(100))
-                        .filter(OptimisticLockingFailureException.class::isInstance)
+                        .map(func)
+                        .flatMap(client::update)
                     )
+                    .retryWhen(Retry.backoff(8, Duration.ofMillis(100))
+                        .filter(OptimisticLockingFailureException.class::isInstance))
             );
     }
 

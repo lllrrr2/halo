@@ -1,41 +1,41 @@
 <script lang="ts" setup>
+import { useFetchRole } from "@/composables/use-role";
+import { rbacAnnotations } from "@/constants/annotations";
+import { useUserStore } from "@/stores/user";
+import { formatDatetime } from "@/utils/date";
+import { usePermission } from "@/utils/permission";
+import type { ListedUser, User } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconAddCircle,
+  IconLockPasswordLine,
+  IconRefreshLine,
   IconUserFollow,
   IconUserSettings,
-  IconLockPasswordLine,
+  Toast,
+  VAvatar,
   VButton,
   VCard,
+  VDropdownItem,
+  VEmpty,
+  VEntity,
+  VEntityField,
+  VLoading,
   VPageHeader,
   VPagination,
   VSpace,
-  VTag,
-  VAvatar,
-  VEntity,
-  VEntityField,
-  Dialog,
   VStatusDot,
-  VLoading,
-  Toast,
-  IconRefreshLine,
-  VEmpty,
-  VDropdownItem,
+  VTag,
 } from "@halo-dev/components";
+import { useQuery } from "@tanstack/vue-query";
+import { useRouteQuery } from "@vueuse/router";
+import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import GrantPermissionModal from "./components/GrantPermissionModal.vue";
+import UserCreationModal from "./components/UserCreationModal.vue";
 import UserEditingModal from "./components/UserEditingModal.vue";
 import UserPasswordChangeModal from "./components/UserPasswordChangeModal.vue";
-import GrantPermissionModal from "./components/GrantPermissionModal.vue";
-import { computed, onMounted, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-import type { User, ListedUser } from "@halo-dev/api-client";
-import { rbacAnnotations } from "@/constants/annotations";
-import { formatDatetime } from "@/utils/date";
-import { useRouteQuery } from "@vueuse/router";
-import { usePermission } from "@/utils/permission";
-import { useUserStore } from "@/stores/user";
-import { useFetchRole } from "@/composables/use-role";
-import { useQuery } from "@tanstack/vue-query";
-import { useI18n } from "vue-i18n";
-import UserCreationModal from "./components/UserCreationModal.vue";
 
 const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
@@ -99,7 +99,7 @@ const {
     selectedRoleValue,
   ],
   queryFn: async () => {
-    const { data } = await apiClient.user.listUsers({
+    const { data } = await consoleApiClient.user.listUsers({
       page: page.value,
       size: size.value,
       keyword: keyword.value,
@@ -136,7 +136,7 @@ const handleDelete = async (user: User) => {
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
       try {
-        await apiClient.extension.user.deletev1alpha1User({
+        await coreApiClient.user.deleteUser({
           name: user.metadata.name,
         });
 
@@ -163,7 +163,7 @@ const handleDeleteInBatch = async () => {
       );
       await Promise.all(
         userNamesToDelete.map((name) => {
-          return apiClient.extension.user.deletev1alpha1User({
+          return coreApiClient.user.deleteUser({
             name,
           });
         })
@@ -232,25 +232,47 @@ onMounted(() => {
     creationModal.value = true;
   }
 });
+
+function onCreationModalClose() {
+  creationModal.value = false;
+  routeQueryAction.value = undefined;
+}
+
+function onEditingModalClose() {
+  editingModal.value = false;
+  selectedUser.value = undefined;
+}
+
+function onPasswordChangeModalClose() {
+  passwordChangeModal.value = false;
+  refetch();
+}
+
+function onGrantPermissionModalClose() {
+  grantPermissionModal.value = false;
+  selectedUser.value = undefined;
+  refetch();
+}
 </script>
 <template>
-  <UserEditingModal v-model:visible="editingModal" :user="selectedUser" />
-
-  <UserCreationModal
-    v-model:visible="creationModal"
-    @close="routeQueryAction = undefined"
+  <UserEditingModal
+    v-if="editingModal && selectedUser"
+    :user="selectedUser"
+    @close="onEditingModalClose"
   />
 
+  <UserCreationModal v-if="creationModal" @close="onCreationModalClose" />
+
   <UserPasswordChangeModal
-    v-model:visible="passwordChangeModal"
+    v-if="passwordChangeModal"
     :user="selectedUser"
-    @close="refetch"
+    @close="onPasswordChangeModalClose"
   />
 
   <GrantPermissionModal
-    v-model:visible="grantPermissionModal"
+    v-if="grantPermissionModal"
     :user="selectedUser"
-    @close="refetch"
+    @close="onGrantPermissionModalClose"
   />
 
   <VPageHeader :title="$t('core.user.title')">

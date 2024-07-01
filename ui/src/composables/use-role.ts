@@ -1,32 +1,23 @@
-import type { Role } from "@halo-dev/api-client";
-import { onUnmounted, type ComputedRef, type Ref } from "vue";
-import { computed, onMounted, ref } from "vue";
-import { roleLabels } from "@/constants/labels";
 import { rbacAnnotations } from "@/constants/annotations";
-import { apiClient } from "@/utils/api-client";
-import { Toast } from "@halo-dev/components";
-import { useI18n } from "vue-i18n";
+import { roleLabels } from "@/constants/labels";
 import { resolveDeepDependencies } from "@/utils/role";
+import type { Role } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
+import { Toast } from "@halo-dev/components";
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+  type ComputedRef,
+  type Ref,
+} from "vue";
+import { useI18n } from "vue-i18n";
 
 interface RoleTemplateGroup {
   module: string | null | undefined;
   roles: Role[];
 }
-
-const initialFormState: Role = {
-  apiVersion: "v1alpha1",
-  kind: "Role",
-  metadata: {
-    name: "",
-    generateName: "role-",
-    labels: {},
-    annotations: {
-      [rbacAnnotations.DEPENDENCIES]: "",
-      [rbacAnnotations.DISPLAY_NAME]: "",
-    },
-  },
-  rules: [],
-};
 
 interface useFetchRoleReturn {
   roles: Ref<Role[]>;
@@ -36,8 +27,7 @@ interface useFetchRoleReturn {
 
 interface useRoleFormReturn {
   formState: Ref<Role>;
-  initialFormState: Role;
-  saving: Ref<boolean>;
+  isSubmitting: Ref<boolean>;
   isUpdateMode: ComputedRef<boolean>;
   handleCreateOrUpdate: () => Promise<void>;
 }
@@ -66,7 +56,7 @@ export function useFetchRole(): useFetchRoleReturn {
         loading.value = true;
       }
 
-      const { data } = await apiClient.extension.role.listv1alpha1Role({
+      const { data } = await coreApiClient.role.listRole({
         page: 0,
         size: 0,
         labelSelector: [`!${roleLabels.TEMPLATE}`],
@@ -110,8 +100,21 @@ export function useFetchRole(): useFetchRoleReturn {
 export function useRoleForm(): useRoleFormReturn {
   const { t } = useI18n();
 
-  const formState = ref<Role>(initialFormState);
-  const saving = ref(false);
+  const formState = ref<Role>({
+    apiVersion: "v1alpha1",
+    kind: "Role",
+    metadata: {
+      name: "",
+      generateName: "role-",
+      labels: {},
+      annotations: {
+        [rbacAnnotations.DEPENDENCIES]: "",
+        [rbacAnnotations.DISPLAY_NAME]: "",
+      },
+    },
+    rules: [],
+  });
+  const isSubmitting = ref(false);
 
   const isUpdateMode = computed(() => {
     return !!formState.value.metadata.creationTimestamp;
@@ -119,16 +122,16 @@ export function useRoleForm(): useRoleFormReturn {
 
   const handleCreateOrUpdate = async () => {
     try {
-      saving.value = true;
+      isSubmitting.value = true;
       if (isUpdateMode.value) {
-        const { data } = await apiClient.extension.role.updatev1alpha1Role({
+        const { data } = await coreApiClient.role.updateRole({
           name: formState.value.metadata.name,
           role: formState.value,
         });
 
         formState.value = data;
       } else {
-        const { data } = await apiClient.extension.role.createv1alpha1Role({
+        const { data } = await coreApiClient.role.createRole({
           role: formState.value,
         });
 
@@ -139,14 +142,13 @@ export function useRoleForm(): useRoleFormReturn {
     } catch (e) {
       console.error(e);
     } finally {
-      saving.value = false;
+      isSubmitting.value = false;
     }
   };
 
   return {
     formState,
-    initialFormState,
-    saving,
+    isSubmitting,
     isUpdateMode,
     handleCreateOrUpdate,
   };

@@ -1,34 +1,34 @@
 <script lang="ts" setup>
+import CategoryFilterDropdown from "@/components/filter/CategoryFilterDropdown.vue";
+import TagFilterDropdown from "@/components/filter/TagFilterDropdown.vue";
+import UserFilterDropdown from "@/components/filter/UserFilterDropdown.vue";
+import { postLabels } from "@/constants/labels";
+import type { ListedPost, Post } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconAddCircle,
   IconArrowLeft,
   IconArrowRight,
   IconBookRead,
   IconRefreshLine,
-  Dialog,
+  Toast,
   VButton,
   VCard,
   VEmpty,
+  VLoading,
   VPageHeader,
   VPagination,
   VSpace,
-  VLoading,
-  Toast,
 } from "@halo-dev/components";
-import PostSettingModal from "./components/PostSettingModal.vue";
-import { computed, ref, watch } from "vue";
-import type { Post, ListedPost } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
-import { postLabels } from "@/constants/labels";
 import { useQuery } from "@tanstack/vue-query";
-import { useI18n } from "vue-i18n";
 import { useRouteQuery } from "@vueuse/router";
-import UserFilterDropdown from "@/components/filter/UserFilterDropdown.vue";
-import CategoryFilterDropdown from "@/components/filter/CategoryFilterDropdown.vue";
-import TagFilterDropdown from "@/components/filter/TagFilterDropdown.vue";
-import PostListItem from "./components/PostListItem.vue";
-import { provide } from "vue";
 import type { Ref } from "vue";
+import { computed, provide, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import PostBatchSettingModal from "./components/PostBatchSettingModal.vue";
+import PostListItem from "./components/PostListItem.vue";
+import PostSettingModal from "./components/PostSettingModal.vue";
 
 const { t } = useI18n();
 
@@ -133,12 +133,10 @@ const {
     }
 
     if (selectedPublishStatus.value !== undefined) {
-      labelSelector.push(
-        `${postLabels.PUBLISHED}=${selectedPublishStatus.value}`
-      );
+      labelSelector.push(selectedPublishStatus.value);
     }
 
-    const { data } = await apiClient.post.listPosts({
+    const { data } = await consoleApiClient.content.post.listPosts({
       labelSelector,
       fieldSelector,
       page: page.value,
@@ -154,31 +152,48 @@ const {
     return data.items;
   },
   refetchInterval: (data) => {
-    const abnormalPosts = data?.some((post) => {
-      const { spec, metadata, status } = post.post;
+    const hasDeletingPost = data?.some((post) => post.post.spec.deleted);
+
+    if (hasDeletingPost) {
+      return 1000;
+    }
+
+    const hasPublishingPost = data?.some((post) => {
+      const { spec, metadata } = post.post;
       return (
-        spec.deleted ||
-        (spec.publish && metadata.labels?.[postLabels.PUBLISHED] !== "true") ||
-        (spec.releaseSnapshot === spec.headSnapshot && status?.inProgress)
+        metadata.labels?.[postLabels.PUBLISHED] !== spec.publish + "" &&
+        metadata.labels?.[postLabels.SCHEDULING_PUBLISH] !== "true"
       );
     });
 
-    return abnormalPosts ? 1000 : false;
+    if (hasPublishingPost) {
+      return 1000;
+    }
+
+    const hasCancelingPublishPost = data?.some((post) => {
+      const { spec, metadata } = post.post;
+      return (
+        !spec.publish &&
+        (metadata.labels?.[postLabels.PUBLISHED] === "true" ||
+          metadata.labels?.[postLabels.SCHEDULING_PUBLISH] === "true")
+      );
+    });
+
+    return hasCancelingPublishPost ? 1000 : false;
   },
 });
 
 const handleOpenSettingModal = async (post: Post) => {
-  const { data } = await apiClient.extension.post.getcontentHaloRunV1alpha1Post(
-    {
-      name: post.metadata.name,
-    }
-  );
+  const { data } = await coreApiClient.content.post.getPost({
+    name: post.metadata.name,
+  });
   selectedPost.value = data;
   settingModal.value = true;
 };
 
 const onSettingModalClose = () => {
   selectedPost.value = undefined;
+  settingModal.value = false;
   refetch();
 };
 
@@ -190,10 +205,9 @@ const handleSelectPrevious = async () => {
   );
 
   if (index > 0) {
-    const { data: previousPost } =
-      await apiClient.extension.post.getcontentHaloRunV1alpha1Post({
-        name: posts.value[index - 1].post.metadata.name,
-      });
+    const { data: previousPost } = await coreApiClient.content.post.getPost({
+      name: posts.value[index - 1].post.metadata.name,
+    });
     selectedPost.value = previousPost;
     return;
   }
@@ -211,10 +225,9 @@ const handleSelectNext = async () => {
     (post) => post.post.metadata.name === selectedPost.value?.metadata.name
   );
   if (index < posts.value.length - 1) {
-    const { data: nextPost } =
-      await apiClient.extension.post.getcontentHaloRunV1alpha1Post({
-        name: posts.value[index + 1].post.metadata.name,
-      });
+    const { data: nextPost } = await coreApiClient.content.post.getPost({
+      name: posts.value[index + 1].post.metadata.name,
+    });
     selectedPost.value = nextPost;
     return;
   }
@@ -255,7 +268,7 @@ const handleDeleteInBatch = async () => {
     onConfirm: async () => {
       await Promise.all(
         selectedPostNames.value.map((name) => {
-          return apiClient.post.recyclePost({
+          return consoleApiClient.content.post.recyclePost({
             name,
           });
         })
@@ -268,13 +281,73 @@ const handleDeleteInBatch = async () => {
   });
 };
 
-watch(selectedPostNames, (newValue) => {
-  checkedAll.value = newValue.length === posts.value?.length;
-});
+const handlePublishInBatch = async () => {
+  Dialog.info({
+    title: t("core.post.operations.publish_in_batch.title"),
+    description: t("core.post.operations.publish_in_batch.description"),
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
+    onConfirm: async () => {
+      for (const i in selectedPostNames.value) {
+        const name = selectedPostNames.value[i];
+        await consoleApiClient.content.post.publishPost({ name });
+      }
+
+      await refetch();
+      selectedPostNames.value = [];
+
+      Toast.success(t("core.common.toast.publish_success"));
+    },
+  });
+};
+
+const handleCancelPublishInBatch = async () => {
+  Dialog.warning({
+    title: t("core.post.operations.cancel_publish_in_batch.title"),
+    description: t("core.post.operations.cancel_publish_in_batch.description"),
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
+    onConfirm: async () => {
+      for (const i in selectedPostNames.value) {
+        const name = selectedPostNames.value[i];
+        await consoleApiClient.content.post.unpublishPost({ name });
+      }
+
+      await refetch();
+      selectedPostNames.value = [];
+
+      Toast.success(t("core.common.toast.cancel_publish_success"));
+    },
+  });
+};
+
+// Batch settings
+const batchSettingModalVisible = ref(false);
+const batchSettingPosts = ref<ListedPost[]>([]);
+
+function handleOpenBatchSettingModal() {
+  batchSettingPosts.value = selectedPostNames.value.map((name) => {
+    return posts.value?.find((post) => post.post.metadata.name === name);
+  }) as ListedPost[];
+
+  batchSettingModalVisible.value = true;
+}
+
+function onBatchSettingModalClose() {
+  batchSettingModalVisible.value = false;
+  batchSettingPosts.value = [];
+}
+
+watch(
+  () => selectedPostNames.value,
+  (newValue) => {
+    checkedAll.value = newValue.length === posts.value?.length;
+  }
+);
 </script>
 <template>
   <PostSettingModal
-    v-model:visible="settingModal"
+    v-if="settingModal"
     :post="selectedPost"
     @close="onSettingModalClose"
   >
@@ -287,6 +360,11 @@ watch(selectedPostNames, (newValue) => {
       </span>
     </template>
   </PostSettingModal>
+  <PostBatchSettingModal
+    v-if="batchSettingModalVisible"
+    :posts="batchSettingPosts"
+    @close="onBatchSettingModalClose"
+  />
   <VPageHeader :title="$t('core.post.title')">
     <template #icon>
       <IconBookRead class="mr-2 self-center" />
@@ -337,6 +415,15 @@ watch(selectedPostNames, (newValue) => {
             <div class="flex w-full flex-1 items-center sm:w-auto">
               <SearchInput v-if="!selectedPostNames.length" v-model="keyword" />
               <VSpace v-else>
+                <VButton @click="handlePublishInBatch">
+                  {{ $t("core.common.buttons.publish") }}
+                </VButton>
+                <VButton @click="handleCancelPublishInBatch">
+                  {{ $t("core.common.buttons.cancel_publish") }}
+                </VButton>
+                <VButton @click="handleOpenBatchSettingModal">
+                  {{ $t("core.post.operations.batch_setting.button") }}
+                </VButton>
                 <VButton type="danger" @click="handleDeleteInBatch">
                   {{ $t("core.common.buttons.delete") }}
                 </VButton>
@@ -357,11 +444,15 @@ watch(selectedPostNames, (newValue) => {
                   },
                   {
                     label: t('core.post.filters.status.items.published'),
-                    value: 'true',
+                    value: `${postLabels.PUBLISHED}=true`,
                   },
                   {
                     label: t('core.post.filters.status.items.draft'),
-                    value: 'false',
+                    value: `${postLabels.PUBLISHED}=false`,
+                  },
+                  {
+                    label: t('core.post.filters.status.items.scheduling'),
+                    value: `${postLabels.SCHEDULING_PUBLISH}=true`,
                   },
                 ]"
               />

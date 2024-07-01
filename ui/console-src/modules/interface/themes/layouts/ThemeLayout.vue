@@ -1,7 +1,14 @@
 <script lang="ts" setup>
 // core libs
-import { nextTick, onMounted, type Ref, computed, watch } from "vue";
-import { provide, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  provide,
+  ref,
+  watch,
+  type Ref,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 // libs
@@ -13,30 +20,30 @@ import { useThemeLifeCycle } from "../composables/use-theme";
 import BasicLayout from "@console/layouts/BasicLayout.vue";
 
 // components
+import { usePermission } from "@/utils/permission";
+import { useThemeStore } from "@console/stores/theme";
+import type { Setting, SettingForm, Theme } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconExchange,
   IconEye,
+  IconListSettings,
   IconPalette,
   VButton,
   VCard,
   VEmpty,
+  VLoading,
   VPageHeader,
   VSpace,
   VTabbar,
-  VLoading,
-  Dialog,
-  IconListSettings,
 } from "@halo-dev/components";
-import ThemeListModal from "../components/ThemeListModal.vue";
-import ThemePreviewModal from "../components/preview/ThemePreviewModal.vue";
-import type { Setting, SettingForm, Theme } from "@halo-dev/api-client";
-import { usePermission } from "@/utils/permission";
-import { useThemeStore } from "@console/stores/theme";
-import { storeToRefs } from "pinia";
-import { apiClient } from "@/utils/api-client";
-import { useI18n } from "vue-i18n";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouteQuery } from "@vueuse/router";
+import { storeToRefs } from "pinia";
+import { useI18n } from "vue-i18n";
+import ThemeListModal from "../components/ThemeListModal.vue";
+import ThemePreviewModal from "../components/preview/ThemePreviewModal.vue";
 
 const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
@@ -78,7 +85,7 @@ provide<Ref<Theme | undefined>>("selectedTheme", selectedTheme);
 const { data: setting } = useQuery<Setting>({
   queryKey: ["theme-setting", selectedTheme],
   queryFn: async () => {
-    const { data } = await apiClient.theme.fetchThemeSetting({
+    const { data } = await consoleApiClient.theme.theme.fetchThemeSetting({
       name: selectedTheme.value?.metadata.name as string,
     });
     return data;
@@ -118,7 +125,7 @@ const { data: setting } = useQuery<Setting>({
 
 provide<Ref<Setting | undefined>>("setting", setting);
 
-const handleTabChange = (id: string) => {
+const handleTabChange = (id: string | number) => {
   const tab = tabs.value.find((item) => item.id === id);
   if (tab) {
     activeTab.value = tab.id;
@@ -268,7 +275,11 @@ onMounted(() => {
       </div>
     </div>
 
-    <ThemeListModal v-model:visible="themesModal" @select="onSelectTheme" />
+    <ThemeListModal
+      v-if="themesModal"
+      @close="themesModal = false"
+      @select="onSelectTheme"
+    />
     <ThemePreviewModal
       v-if="previewModal"
       :theme="selectedTheme"

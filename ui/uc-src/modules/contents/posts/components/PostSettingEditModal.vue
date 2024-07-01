@@ -1,12 +1,12 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import PostSettingForm from "./PostSettingForm.vue";
-import type { PostFormState } from "../types";
+import { toDatetimeLocal } from "@/utils/date";
 import type { Post } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { usePostUpdateMutate } from "@uc/modules/contents/posts/composables/use-post-update-mutate";
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toDatetimeLocal } from "@/utils/date";
-import { usePostUpdateMutate } from "@uc/modules/contents/posts/composables/use-post-update-mutate";
+import type { PostFormState } from "../types";
+import PostSettingForm from "./PostSettingForm.vue";
 
 const { t } = useI18n();
 
@@ -22,7 +22,7 @@ const emit = defineEmits<{
   (event: "success", post: Post): void;
 }>();
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
 const { mutateAsync, isLoading } = usePostUpdateMutate();
 
@@ -51,7 +51,7 @@ async function onSubmit(data: PostFormState) {
 
   Toast.success(t("core.common.toast.save_success"));
   emit("success", newPost);
-  modal.value.close();
+  modal.value?.close();
 }
 </script>
 
@@ -92,7 +92,7 @@ async function onSubmit(data: PostFormState) {
         >
           {{ $t("core.common.buttons.save") }}
         </VButton>
-        <VButton type="default" @click="modal.close()">
+        <VButton type="default" @click="modal?.close()">
           {{ $t("core.common.buttons.close") }}
         </VButton>
       </VSpace>

@@ -1,48 +1,65 @@
 package run.halo.app.core.extension.service.impl;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
 
 import com.github.zafarkhaja.semver.Version;
 import com.google.common.hash.Hashing;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pf4j.PluginDescriptor;
 import org.pf4j.PluginWrapper;
-import org.pf4j.RuntimeMode;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.util.FileSystemUtils;
 import org.springframework.web.server.ServerWebInputException;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import reactor.test.publisher.PublisherProbe;
 import run.halo.app.core.extension.Plugin;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.SystemVersionSupplier;
 import run.halo.app.infra.exception.PluginAlreadyExistsException;
 import run.halo.app.infra.utils.FileUtils;
-import run.halo.app.plugin.HaloPluginManager;
 import run.halo.app.plugin.PluginConst;
 import run.halo.app.plugin.PluginProperties;
+import run.halo.app.plugin.SpringPluginManager;
 import run.halo.app.plugin.YamlPluginFinder;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,8 +75,9 @@ class PluginServiceImplTest {
     PluginProperties pluginProperties;
 
     @Mock
-    HaloPluginManager pluginManager;
+    SpringPluginManager pluginManager;
 
+    @Spy
     @InjectMocks
     PluginServiceImpl pluginService;
 
@@ -233,28 +251,10 @@ class PluginServiceImplTest {
             verify(client).update(testPlugin);
         }
 
-        Plugin createPlugin(String name, Consumer<Plugin> pluginConsumer) {
-            var plugin = new Plugin();
-            plugin.setMetadata(new Metadata());
-            plugin.getMetadata().setName(name);
-            plugin.setSpec(new Plugin.PluginSpec());
-            plugin.setStatus(new Plugin.PluginStatus());
-            pluginConsumer.accept(plugin);
-            return plugin;
-        }
     }
 
-
     @Test
-    void generateJsBundleVersionTest() {
-        when(pluginManager.getRuntimeMode()).thenReturn(RuntimeMode.DEVELOPMENT);
-
-        pluginService.generateJsBundleVersion()
-            .as(StepVerifier::create)
-            .consumeNextWith(version -> assertThat(version).isNotNull())
-            .verifyComplete();
-
-        when(pluginManager.getRuntimeMode()).thenReturn(RuntimeMode.DEPLOYMENT);
+    void generateBundleVersionTest() {
         var plugin1 = mock(PluginWrapper.class);
         var plugin2 = mock(PluginWrapper.class);
         var plugin3 = mock(PluginWrapper.class);
@@ -279,7 +279,7 @@ class PluginServiceImplTest {
         var result = Hashing.sha256().hashUnencodedChars(str).toString();
         assertThat(result.length()).isEqualTo(64);
 
-        pluginService.generateJsBundleVersion()
+        pluginService.generateBundleVersion()
             .as(StepVerifier::create)
             .consumeNextWith(version -> assertThat(version).isEqualTo(result))
             .verifyComplete();
@@ -292,11 +292,219 @@ class PluginServiceImplTest {
         var str2 = "fake-1:1.0.0fake-2:2.0.0fake-4:3.0.0";
         var result2 = Hashing.sha256().hashUnencodedChars(str2).toString();
         when(pluginManager.getStartedPlugins()).thenReturn(List.of(plugin1, plugin2, plugin4));
-        pluginService.generateJsBundleVersion()
+        pluginService.generateBundleVersion()
             .as(StepVerifier::create)
             .consumeNextWith(version -> assertThat(version).isEqualTo(result2))
             .verifyComplete();
 
         assertThat(result).isNotEqualTo(result2);
+    }
+
+    @Test
+    void shouldGenerateRandomBundleVersionInDevelopment() {
+        var clock = Clock.fixed(Instant.now(), ZoneId.systemDefault());
+        pluginService.setClock(clock);
+        when(pluginManager.isDevelopment()).thenReturn(true);
+        pluginService.generateBundleVersion()
+            .as(StepVerifier::create)
+            .expectNext(String.valueOf(clock.instant().toEpochMilli()))
+            .verifyComplete();
+
+        verify(pluginManager, never()).getStartedPlugins();
+    }
+
+    @Nested
+    class PluginStateChangeTest {
+
+        @Test
+        void shouldEnablePluginIfPluginWasNotStarted() {
+            var plugin = createPlugin("fake-plugin", p -> {
+                p.getSpec().setEnabled(false);
+                p.statusNonNull().setPhase(Plugin.Phase.RESOLVED);
+            });
+
+            when(client.get(Plugin.class, "fake-plugin")).thenReturn(Mono.just(plugin))
+                .thenReturn(Mono.fromSupplier(() -> {
+                    plugin.statusNonNull().setPhase(Plugin.Phase.STARTED);
+                    return plugin;
+                }));
+            when(client.update(plugin)).thenReturn(Mono.just(plugin));
+
+            pluginService.changeState("fake-plugin", true, false)
+                .as(StepVerifier::create)
+                .expectNext(plugin)
+                .verifyComplete();
+
+            assertTrue(plugin.getSpec().getEnabled());
+        }
+
+        @Test
+        void shouldDisablePluginIfAlreadyStarted() {
+            var plugin = createPlugin("fake-plugin", p -> {
+                p.getSpec().setEnabled(true);
+                p.statusNonNull().setPhase(Plugin.Phase.STARTED);
+            });
+
+            when(client.get(Plugin.class, "fake-plugin")).thenReturn(Mono.just(plugin))
+                .thenReturn(Mono.fromSupplier(() -> {
+                    plugin.getStatus().setPhase(Plugin.Phase.STOPPED);
+                    return plugin;
+                }));
+            when(client.update(plugin)).thenReturn(Mono.just(plugin));
+
+            pluginService.changeState("fake-plugin", false, false)
+                .as(StepVerifier::create)
+                .expectNext(plugin)
+                .verifyComplete();
+            assertFalse(plugin.getSpec().getEnabled());
+        }
+    }
+
+    @Nested
+    class BundleCacheTest {
+
+        PluginServiceImpl.BundleCache cache;
+
+        @TempDir
+        Path tempDir;
+
+        @BeforeEach
+        void setUp() {
+            pluginService.setTempDir(tempDir);
+            cache = pluginService.new BundleCache(".js");
+        }
+
+        @Test
+        void shouldComputeBundleFileIfAbsent() {
+            doReturn(Mono.just("different-version")).when(pluginService).generateBundleVersion();
+            var fakeContent = Mono.<DataBuffer>just(sharedInstance.wrap("fake-content".getBytes(
+                UTF_8)));
+            cache.computeIfAbsent("fake-version", fakeContent)
+                .as(StepVerifier::create)
+                .assertNext(resource -> {
+                    try {
+                        assertEquals(tempDir.resolve("different-version.js"),
+                            resource.getFile().toPath());
+                        assertEquals("different-version.js", resource.getFilename());
+                        assertEquals("fake-content", resource.getContentAsString(UTF_8));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .verifyComplete();
+
+            try {
+                FileSystemUtils.deleteRecursively(tempDir);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            cache.computeIfAbsent("fake-version", fakeContent)
+                .as(StepVerifier::create)
+                .assertNext(resource -> {
+                    try {
+                        assertThat(Files.exists(tempDir)).isTrue();
+                        assertEquals(tempDir.resolve("different-version.js"),
+                            resource.getFile().toPath());
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .verifyComplete();
+        }
+
+        @Test
+        void shouldNotComputeBundleFileIfPresentAndVersionIsMatch() {
+            shouldComputeBundleFileIfAbsent();
+
+            var fakeContent = Mono.<DataBuffer>just(
+                sharedInstance.wrap("another-fake-content".getBytes(UTF_8)));
+
+            cache.computeIfAbsent("different-version", fakeContent)
+                .as(StepVerifier::create)
+                .assertNext(resource -> {
+                    try {
+                        assertEquals("different-version.js", resource.getFilename());
+                        // The content won't be changed if the version is matched.
+                        assertEquals("fake-content", resource.getContentAsString(UTF_8));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .verifyComplete();
+        }
+
+        @Test
+        void shouldComputeBundleFileIfPresentButVersionMismatch() {
+            shouldComputeBundleFileIfAbsent();
+
+            var fakeContent = Mono.<DataBuffer>just(
+                sharedInstance.wrap("another-fake-content".getBytes(UTF_8)));
+
+            doReturn(Mono.just("updated-version")).when(pluginService).generateBundleVersion();
+
+            cache.computeIfAbsent("mismatch-version", fakeContent)
+                .as(StepVerifier::create)
+                .assertNext(resource -> {
+                    try {
+                        assertTrue(Files.notExists(tempDir.resolve("different-version.js")));
+                        assertEquals("updated-version.js", resource.getFilename());
+                        assertEquals("another-fake-content", resource.getContentAsString(UTF_8));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .verifyComplete();
+        }
+
+        @RepeatedTest(10)
+        void concurrentComputeBundleFileIfAbsent() {
+            lenient().doReturn(Mono.just("different-version"))
+                .when(pluginService)
+                .generateBundleVersion();
+
+            var executorService = Executors.newCachedThreadPool();
+
+            var probes = new ArrayList<PublisherProbe<DataBuffer>>();
+            List<? extends Future<?>> futures = IntStream.range(0, 10)
+                .mapToObj(i -> {
+                    var fakeContent = Mono.<DataBuffer>just(sharedInstance.wrap(
+                        ("fake-content-" + i).getBytes(UTF_8)
+                    ));
+                    var probe = PublisherProbe.of(fakeContent);
+                    probes.add(probe);
+                    return executorService.submit(
+                        () -> {
+                            cache.computeIfAbsent("fake-version", probe.mono())
+                                .as(StepVerifier::create)
+                                .expectNextCount(1)
+                                .verifyComplete();
+                        });
+                })
+                .toList();
+            executorService.shutdown();
+            futures.forEach(future -> {
+                try {
+                    future.get();
+                } catch (InterruptedException | ExecutionException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            // ensure only one probe was subscribed
+            var subscribedCount = probes.stream()
+                .filter(PublisherProbe::wasSubscribed)
+                .count();
+            assertEquals(1, subscribedCount);
+        }
+    }
+
+    Plugin createPlugin(String name, Consumer<Plugin> pluginConsumer) {
+        var plugin = new Plugin();
+        plugin.setMetadata(new Metadata());
+        plugin.getMetadata().setName(name);
+        plugin.setSpec(new Plugin.PluginSpec());
+        plugin.setStatus(new Plugin.PluginStatus());
+        pluginConsumer.accept(plugin);
+        return plugin;
     }
 }

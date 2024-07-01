@@ -1,23 +1,26 @@
 <script lang="ts" setup>
+import type { Menu, MenuItem } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
 import {
+  Dialog,
   IconAddCircle,
   IconListSettings,
-  Dialog,
+  Toast,
   VButton,
   VCard,
   VEmpty,
+  VLoading,
   VPageHeader,
   VSpace,
-  VLoading,
-  Toast,
 } from "@halo-dev/components";
+import { useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useDebounceFn } from "@vueuse/core";
+import { cloneDeep } from "lodash-es";
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import MenuItemEditingModal from "./components/MenuItemEditingModal.vue";
 import MenuItemListItem from "./components/MenuItemListItem.vue";
 import MenuList from "./components/MenuList.vue";
-import { computed, ref } from "vue";
-import { apiClient } from "@/utils/api-client";
-import type { Menu, MenuItem } from "@halo-dev/api-client";
-import { cloneDeep } from "lodash-es";
 import type { MenuTreeItem } from "./utils";
 import {
   buildMenuItemsTree,
@@ -26,9 +29,6 @@ import {
   getChildrenNames,
   resetMenuItemsTreePriority,
 } from "./utils";
-import { useDebounceFn } from "@vueuse/core";
-import { useI18n } from "vue-i18n";
-import { useQuery, useQueryClient } from "@tanstack/vue-query";
 
 const { t } = useI18n();
 const queryClient = useQueryClient();
@@ -51,7 +51,7 @@ const {
     }
 
     const menuItemNames = selectedMenu.value.spec.menuItems.filter(Boolean);
-    const { data } = await apiClient.extension.menuItem.listv1alpha1MenuItem({
+    const { data } = await coreApiClient.menuItem.listMenuItem({
       page: 0,
       size: 0,
       fieldSelector: [`name=(${menuItemNames.join(",")})`],
@@ -72,8 +72,8 @@ const {
 });
 
 const handleOpenEditingModal = (menuItem: MenuTreeItem) => {
-  apiClient.extension.menuItem
-    .getv1alpha1MenuItem({
+  coreApiClient.menuItem
+    .getMenuItem({
       name: menuItem.metadata.name,
     })
     .then((response) => {
@@ -90,6 +90,7 @@ const handleOpenCreateByParentModal = (menuItem: MenuTreeItem) => {
 const onMenuItemEditingModalClose = () => {
   selectedParentMenuItem.value = undefined;
   selectedMenuItem.value = undefined;
+  menuItemEditingModal.value = false;
 };
 
 const onMenuItemSaved = async (menuItem: MenuItem) => {
@@ -105,7 +106,7 @@ const onMenuItemSaved = async (menuItem: MenuItem) => {
       menuItem.metadata.name,
     ];
 
-    await apiClient.extension.menu.updatev1alpha1Menu({
+    await coreApiClient.menu.updateMenu({
       name: menuToUpdate.metadata.name,
       menu: menuToUpdate,
     });
@@ -115,12 +116,15 @@ const onMenuItemSaved = async (menuItem: MenuItem) => {
   await refetch();
 };
 
+const batchUpdating = ref(false);
+
 const handleUpdateInBatch = useDebounceFn(async () => {
   const menuTreeItemsToUpdate = resetMenuItemsTreePriority(menuTreeItems.value);
   const menuItemsToUpdate = convertTreeToMenuItems(menuTreeItemsToUpdate);
   try {
+    batchUpdating.value = true;
     const promises = menuItemsToUpdate.map((menuItem) =>
-      apiClient.extension.menuItem.updatev1alpha1MenuItem({
+      coreApiClient.menuItem.updateMenuItem({
         name: menuItem.metadata.name,
         menuItem,
       })
@@ -131,6 +135,7 @@ const handleUpdateInBatch = useDebounceFn(async () => {
   } finally {
     await queryClient.invalidateQueries({ queryKey: ["menus"] });
     await refetch();
+    batchUpdating.value = false;
   }
 }, 300);
 
@@ -142,7 +147,7 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
-      await apiClient.extension.menuItem.deletev1alpha1MenuItem({
+      await coreApiClient.menuItem.deleteMenuItem({
         name: menuItem.metadata.name,
       });
 
@@ -150,7 +155,7 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
 
       if (childrenNames.length) {
         const deleteChildrenRequests = childrenNames.map((name) =>
-          apiClient.extension.menuItem.deletev1alpha1MenuItem({
+          coreApiClient.menuItem.deleteMenuItem({
             name,
           })
         );
@@ -165,7 +170,7 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
         menuToUpdate.spec.menuItems = menuToUpdate.spec.menuItems?.filter(
           (name) => ![menuItem.metadata.name, ...childrenNames].includes(name)
         );
-        await apiClient.extension.menu.updatev1alpha1Menu({
+        await coreApiClient.menu.updateMenu({
           name: menuToUpdate.metadata.name,
           menu: menuToUpdate,
         });
@@ -180,7 +185,7 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
 </script>
 <template>
   <MenuItemEditingModal
-    v-model:visible="menuItemEditingModal"
+    v-if="menuItemEditingModal && selectedMenu"
     :menu-item="selectedMenuItem"
     :parent-menu-item="selectedParentMenuItem"
     :menu="selectedMenu"
@@ -194,7 +199,7 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
   </VPageHeader>
   <div class="m-0 md:m-4">
     <div class="flex flex-col gap-4 sm:flex-row">
-      <div class="w-96">
+      <div class="w-96 flex-none">
         <MenuList v-model:selected-menu="selectedMenu" />
       </div>
       <div class="flex-1">
@@ -251,7 +256,10 @@ const handleDelete = async (menuItem: MenuTreeItem) => {
           </Transition>
           <Transition v-else appear name="fade">
             <MenuItemListItem
-              :menu-tree-items="menuTreeItems"
+              v-model="menuTreeItems"
+              :class="{
+                'cursor-progress opacity-60': batchUpdating,
+              }"
               @change="handleUpdateInBatch"
               @delete="handleDelete"
               @open-editing="handleOpenEditingModal"

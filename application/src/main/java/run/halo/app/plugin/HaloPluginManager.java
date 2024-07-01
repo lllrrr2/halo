@@ -2,7 +2,9 @@ package run.halo.app.plugin;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Stack;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.pf4j.CompoundPluginLoader;
@@ -18,11 +20,15 @@ import org.pf4j.PluginDescriptorFinder;
 import org.pf4j.PluginFactory;
 import org.pf4j.PluginLoader;
 import org.pf4j.PluginRepository;
+import org.pf4j.PluginState;
+import org.pf4j.PluginStateEvent;
+import org.pf4j.PluginStateListener;
 import org.pf4j.PluginStatusProvider;
 import org.pf4j.PluginWrapper;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.util.Lazy;
 import run.halo.app.infra.SystemVersionSupplier;
+import run.halo.app.plugin.event.PluginStartedEvent;
 
 /**
  * PluginManager to hold the main ApplicationContext.
@@ -54,6 +60,9 @@ public class HaloPluginManager extends DefaultPluginManager implements SpringPlu
         setSystemVersion(systemVersionSupplier.get().getNormalVersion());
 
         super.initialize();
+
+        // the listener must be after the super#initialize
+        addPluginStateListener(new PluginStartedListener());
     }
 
     @Override
@@ -77,7 +86,8 @@ public class HaloPluginManager extends DefaultPluginManager implements SpringPlu
     @Override
     protected PluginFactory createPluginFactory() {
         var contextFactory = new DefaultPluginApplicationContextFactory(this);
-        return new SpringPluginFactory(contextFactory);
+        var pluginGetter = rootContext.getBean(PluginGetter.class);
+        return new SpringPluginFactory(contextFactory, pluginGetter);
     }
 
     @Override
@@ -157,4 +167,45 @@ public class HaloPluginManager extends DefaultPluginManager implements SpringPlu
         return sharedContext.get();
     }
 
+    @Override
+    public List<PluginWrapper> getDependents(String pluginId) {
+        var dependents = new ArrayList<PluginWrapper>();
+        var stack = new Stack<String>();
+        dependencyResolver.getDependents(pluginId).forEach(stack::push);
+        while (!stack.isEmpty()) {
+            var dependent = stack.pop();
+            var pluginWrapper = getPlugin(dependent);
+            if (pluginWrapper != null) {
+                dependents.add(pluginWrapper);
+                dependencyResolver.getDependents(dependent).forEach(stack::push);
+            }
+        }
+        return dependents;
+    }
+
+    /**
+     * Listener for plugin started event.
+     *
+     * @author johnniang
+     * @since 2.17.0
+     */
+    private static class PluginStartedListener implements PluginStateListener {
+
+        @Override
+        public void pluginStateChanged(PluginStateEvent event) {
+            if (PluginState.STARTED.equals(event.getPluginState())) {
+                var plugin = event.getPlugin().getPlugin();
+                if (plugin instanceof SpringPlugin springPlugin) {
+                    try {
+                        springPlugin.getApplicationContext()
+                            .publishEvent(new PluginStartedEvent(this));
+                    } catch (Throwable t) {
+                        var pluginId = event.getPlugin().getPluginId();
+                        log.warn("Error while publishing plugin started event for plugin {}",
+                            pluginId, t);
+                    }
+                }
+            }
+        }
+    }
 }

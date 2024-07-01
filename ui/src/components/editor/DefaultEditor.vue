@@ -1,62 +1,63 @@
 <script lang="ts" setup>
 import {
+  DecorationSet,
+  Editor,
   Extension,
-  RichTextEditor,
   ExtensionBlockquote,
   ExtensionBold,
   ExtensionBulletList,
+  ExtensionClearFormat,
   ExtensionCode,
+  ExtensionCodeBlock,
+  ExtensionColor,
+  ExtensionColumn,
+  ExtensionColumns,
+  ExtensionCommands,
   ExtensionDocument,
+  ExtensionDraggable,
   ExtensionDropcursor,
+  ExtensionFontSize,
+  ExtensionFormatBrush,
   ExtensionGapcursor,
   ExtensionHardBreak,
   ExtensionHeading,
+  ExtensionHighlight,
   ExtensionHistory,
   ExtensionHorizontalRule,
+  ExtensionIframe,
+  ExtensionIndent,
   ExtensionItalic,
-  ExtensionOrderedList,
-  ExtensionStrike,
-  ExtensionText,
-  ExtensionTaskList,
   ExtensionLink,
-  ExtensionTextAlign,
-  ExtensionUnderline,
-  ExtensionTable,
+  ExtensionListKeymap,
+  ExtensionNodeSelected,
+  ExtensionOrderedList,
+  ExtensionPlaceholder,
+  ExtensionRangeSelection,
+  ExtensionSearchAndReplace,
+  ExtensionStrike,
   ExtensionSubscript,
   ExtensionSuperscript,
-  ExtensionPlaceholder,
-  ExtensionHighlight,
-  ExtensionCommands,
-  ExtensionIframe,
-  ExtensionCodeBlock,
-  ExtensionFontSize,
-  ExtensionColor,
-  ExtensionIndent,
-  lowlight,
-  type AnyExtension,
-  Editor,
-  ToolboxItem,
-  ExtensionDraggable,
-  ExtensionColumns,
-  ExtensionColumn,
-  ExtensionNodeSelected,
+  ExtensionTable,
+  ExtensionTaskList,
+  ExtensionText,
+  ExtensionTextAlign,
   ExtensionTrailingNode,
-  ToolbarItem,
+  ExtensionUnderline,
   Plugin,
   PluginKey,
-  DecorationSet,
-  ExtensionListKeymap,
-  ExtensionSearchAndReplace,
-  ExtensionClearFormat,
-  ExtensionFormatBrush,
+  RichTextEditor,
+  ToolbarItem,
+  ToolboxItem,
+  lowlight,
+  type AnyExtension,
 } from "@halo-dev/richtext-editor";
 // ui custom extension
-import {
-  UiExtensionAudio,
-  UiExtensionImage,
-  UiExtensionUpload,
-  UiExtensionVideo,
-} from "./extensions";
+import { i18n } from "@/locales";
+import { usePluginModuleStore } from "@/stores/plugin";
+import { formatDatetime } from "@/utils/date";
+import { usePermission } from "@/utils/permission";
+import AttachmentSelectorModal from "@console/modules/contents/attachments/components/AttachmentSelectorModal.vue";
+import type { Attachment } from "@halo-dev/api-client";
 import {
   IconCalendar,
   IconCharacterRecognition,
@@ -66,8 +67,22 @@ import {
   VTabItem,
   VTabs,
 } from "@halo-dev/components";
-import AttachmentSelectorModal from "@console/modules/contents/attachments/components/AttachmentSelectorModal.vue";
+import type { AttachmentLike } from "@halo-dev/console-shared";
 import ExtensionCharacterCount from "@tiptap/extension-character-count";
+import { useDebounceFn, useLocalStorage } from "@vueuse/core";
+import type { AxiosRequestConfig } from "axios";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import {
+  inject,
+  markRaw,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+  type ComputedRef,
+} from "vue";
+import { useI18n } from "vue-i18n";
 import MdiFormatHeader1 from "~icons/mdi/format-header-1";
 import MdiFormatHeader2 from "~icons/mdi/format-header-2";
 import MdiFormatHeader3 from "~icons/mdi/format-header-3";
@@ -75,29 +90,14 @@ import MdiFormatHeader4 from "~icons/mdi/format-header-4";
 import MdiFormatHeader5 from "~icons/mdi/format-header-5";
 import MdiFormatHeader6 from "~icons/mdi/format-header-6";
 import RiLayoutRightLine from "~icons/ri/layout-right-line";
-import {
-  inject,
-  markRaw,
-  ref,
-  watch,
-  onMounted,
-  shallowRef,
-  type ComputedRef,
-} from "vue";
-import { formatDatetime } from "@/utils/date";
 import { useAttachmentSelect } from "./composables/use-attachment";
-import type { Attachment } from "@halo-dev/api-client";
-import { useI18n } from "vue-i18n";
-import { i18n } from "@/locales";
-import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
-import { usePluginModuleStore } from "@/stores/plugin";
-import type { AttachmentLike, PluginModule } from "@halo-dev/console-shared";
-import { useDebounceFn, useLocalStorage } from "@vueuse/core";
-import { onBeforeUnmount } from "vue";
-import { usePermission } from "@/utils/permission";
-import type { AxiosRequestConfig } from "axios";
+import {
+  UiExtensionAudio,
+  UiExtensionImage,
+  UiExtensionUpload,
+  UiExtensionVideo,
+} from "./extensions";
 import { getContents } from "./utils/attachment";
-import { nextTick } from "vue";
 
 const { t } = useI18n();
 const { currentUserHasPermission } = usePermission();
@@ -169,6 +169,7 @@ const attachmentSelectorModal = ref(false);
 const { onAttachmentSelect, attachmentResult } = useAttachmentSelect();
 
 const editor = shallowRef<Editor>();
+const editorTitleRef = ref();
 
 const { pluginModules } = usePluginModuleStore();
 
@@ -189,20 +190,21 @@ const handleCloseAttachmentSelectorModal = () => {
   attachmentOptions.value = initAttachmentOptions;
 };
 
-onMounted(() => {
+onMounted(async () => {
   const extensionsFromPlugins: AnyExtension[] = [];
-  pluginModules.forEach((pluginModule: PluginModule) => {
-    const { extensionPoints } = pluginModule;
-    if (!extensionPoints?.["default:editor:extension:create"]) {
-      return;
+
+  for (const pluginModule of pluginModules) {
+    const callbackFunction =
+      pluginModule?.extensionPoints?.["default:editor:extension:create"];
+
+    if (typeof callbackFunction !== "function") {
+      continue;
     }
 
-    const extensions = extensionPoints[
-      "default:editor:extension:create"
-    ]() as [];
+    const extensions = await callbackFunction();
 
     extensionsFromPlugins.push(...extensions);
-  });
+  }
 
   // debounce OnUpdate
   const debounceOnUpdate = useDebounceFn(() => {
@@ -400,12 +402,20 @@ onMounted(() => {
       ExtensionSearchAndReplace,
       ExtensionClearFormat,
       ExtensionFormatBrush,
+      ExtensionRangeSelection,
     ],
     parseOptions: {
       preserveWhitespace: true,
     },
     onUpdate: () => {
       debounceOnUpdate();
+    },
+    onCreate() {
+      if (editor.value?.isEmpty && !props.title) {
+        editorTitleRef.value.focus();
+      } else {
+        editor.value?.commands.focus();
+      }
     },
   });
 });
@@ -441,22 +451,6 @@ const currentLocale = i18n.global.locale.value as
 function onTitleInput(event: Event) {
   emit("update:title", (event.target as HTMLInputElement).value);
 }
-
-// Set focus
-const editorTitleRef = ref();
-onMounted(() => {
-  // if name is empty, it means the editor is in the creation mode
-  const urlParams = new URLSearchParams(window.location.search);
-  const name = urlParams.get("name");
-
-  if (!name) {
-    nextTick(() => {
-      editorTitleRef.value.focus();
-    });
-  } else {
-    editor.value?.commands.focus();
-  }
-});
 </script>
 
 <template>
