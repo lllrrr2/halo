@@ -1,85 +1,148 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
 import type { User } from "@halo-dev/api-client";
-import { VModal, VSpace, VButton } from "@halo-dev/components";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { useMutation } from "@tanstack/vue-query";
+import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import SubmitButton from "@/components/button/SubmitButton.vue";
-import { ref } from "vue";
+import { rbacAnnotations } from "@/constants/annotations";
+import { SUPER_ROLE_NAME } from "@/constants/constants";
+import { useFetchRoles, useFetchRoleTemplates } from "../composables/use-role";
+import RolesView from "./RolesView.vue";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
     user?: User;
   }>(),
   {
-    visible: false,
     user: undefined,
   }
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const selectedRole = ref("");
-const saving = ref(false);
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
-const handleGrantPermission = async () => {
-  try {
-    saving.value = true;
-    await apiClient.user.grantPermission({
+const selectedRoleNames = ref<string[]>([]);
+
+onMounted(() => {
+  if (!props.user) {
+    return;
+  }
+  selectedRoleNames.value = JSON.parse(
+    props.user.metadata.annotations?.[rbacAnnotations.ROLE_NAMES] || "[]"
+  );
+});
+
+const { mutate, isLoading } = useMutation({
+  mutationKey: ["core:user:grant-permissions"],
+  mutationFn: async ({ roles }: { roles: string[] }) => {
+    return await consoleApiClient.user.grantPermission({
       name: props.user?.metadata.name as string,
       grantRequest: {
-        roles: [selectedRole.value],
+        roles: roles,
       },
     });
-    onVisibleChange(false);
-  } catch (error) {
-    console.error("Failed to grant permission to user", error);
-  } finally {
-    saving.value = false;
-  }
-};
+  },
+  onSuccess() {
+    Toast.success(t("core.common.toast.operation_success"));
+    modal.value?.close();
+  },
+});
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
+function onSubmit(data: { roles: string[] }) {
+  mutate({ roles: data.roles });
+}
+
+const { data: allRoles } = useFetchRoles();
+const { data: allRoleTemplates } = useFetchRoleTemplates();
+
+const currentRoleTemplates = computed(() => {
+  if (!selectedRoleNames.value.length) {
+    return [];
   }
-};
+
+  const selectedRoles = allRoles.value?.filter((role) =>
+    selectedRoleNames.value.includes(role.metadata.name)
+  );
+
+  let allDependsRoleTemplates: string[] = [];
+
+  selectedRoles?.forEach((role) => {
+    allDependsRoleTemplates = allDependsRoleTemplates.concat(
+      JSON.parse(
+        role.metadata.annotations?.[rbacAnnotations.DEPENDENCIES] || "[]"
+      )
+    );
+  });
+
+  return allRoleTemplates.value?.filter((item) => {
+    return allDependsRoleTemplates.includes(item.metadata.name);
+  });
+});
 </script>
 
 <template>
   <VModal
+    ref="modal"
     :title="$t('core.user.grant_permission_modal.title')"
-    :visible="visible"
-    :width="500"
-    @update:visible="onVisibleChange"
+    :width="600"
+    :centered="false"
+    @close="emit('close')"
   >
-    <FormKit
-      id="grant-permission-form"
-      name="grant-permission-form"
-      :config="{ validationVisibility: 'submit' }"
-      type="form"
-      @submit="handleGrantPermission"
-    >
+    <div>
       <FormKit
-        v-model="selectedRole"
-        :label="$t('core.user.grant_permission_modal.fields.role.label')"
-        type="roleSelect"
-      ></FormKit>
-    </FormKit>
+        id="grant-permission-form"
+        name="grant-permission-form"
+        :config="{ validationVisibility: 'submit' }"
+        type="form"
+        @submit="onSubmit"
+      >
+        <!-- @vue-ignore -->
+        <FormKit
+          v-model="selectedRoleNames"
+          multiple
+          name="roles"
+          :label="$t('core.user.grant_permission_modal.fields.role.label')"
+          type="roleSelect"
+          :placeholder="
+            $t('core.user.grant_permission_modal.fields.role.placeholder')
+          "
+        ></FormKit>
+      </FormKit>
+
+      <div v-if="selectedRoleNames.length">
+        <div
+          v-if="selectedRoleNames.includes(SUPER_ROLE_NAME)"
+          class="mt-4 text-sm text-gray-600"
+        >
+          {{ $t("core.user.grant_permission_modal.roles_preview.all") }}
+        </div>
+
+        <div v-else-if="currentRoleTemplates?.length" class="mt-4 space-y-3">
+          <span class="text-sm text-gray-600">
+            {{ $t("core.user.grant_permission_modal.roles_preview.includes") }}
+          </span>
+          <RolesView :role-templates="currentRoleTemplates" />
+        </div>
+      </div>
+    </div>
+
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isLoading"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('grant-permission-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

@@ -1,28 +1,28 @@
 <script lang="ts" setup>
-// core libs
-import { ref, type Ref, provide } from "vue";
-
-// components
+import type { Setting, SettingForm } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
 import {
+  IconSettings,
   VCard,
+  VLoading,
   VPageHeader,
   VTabbar,
-  IconSettings,
 } from "@halo-dev/components";
-import type { Setting, SettingForm } from "@halo-dev/api-client";
+import { utils } from "@halo-dev/ui-shared";
 import { useQuery } from "@tanstack/vue-query";
-import { apiClient } from "@/utils/api-client";
-import { useI18n } from "vue-i18n";
-import type { Raw } from "vue";
-import type { Component } from "vue";
-import { markRaw } from "vue";
-import SettingTab from "./tabs/Setting.vue";
 import { useRouteQuery } from "@vueuse/router";
-import NotificationsTab from "./tabs/Notifications.vue";
-import { usePermission } from "@/utils/permission";
+import type { Component, Raw } from "vue";
+import {
+  defineAsyncComponent,
+  markRaw,
+  provide,
+  shallowRef,
+  type Ref,
+} from "vue";
+import { useI18n } from "vue-i18n";
+import SettingTab from "./tabs/Setting.vue";
 
 const { t } = useI18n();
-const { currentUserHasPermission } = usePermission();
 
 interface Tab {
   id: string;
@@ -30,7 +30,7 @@ interface Tab {
   component: Raw<Component>;
 }
 
-const tabs = ref<Tab[]>([
+const tabs = shallowRef<Tab[]>([
   {
     id: "loading",
     label: t("core.common.status.loading"),
@@ -44,7 +44,7 @@ provide<Ref<string>>("activeTab", activeTab);
 const { data: setting } = useQuery({
   queryKey: ["system-setting"],
   queryFn: async () => {
-    const { data } = await apiClient.extension.setting.getv1alpha1Setting({
+    const { data } = await coreApiClient.setting.getSetting({
       name: "system",
     });
     return data;
@@ -65,12 +65,18 @@ const { data: setting } = useQuery({
       }
 
       // TODO: use integrations center to refactor this
-      if (currentUserHasPermission(["system:notifier:configuration"])) {
-        tabs.value.push({
-          id: "notification",
-          label: "通知设置",
-          component: markRaw(NotificationsTab),
-        });
+      if (utils.permission.has(["system:notifier:configuration"])) {
+        tabs.value = [
+          ...tabs.value,
+          {
+            id: "notification",
+            label: "通知设置",
+            component: defineAsyncComponent({
+              loader: () => import("./tabs/Notifications.vue"),
+              loadingComponent: VLoading,
+            }),
+          },
+        ];
       }
     }
   },
@@ -81,7 +87,7 @@ provide<Ref<Setting | undefined>>("setting", setting);
 <template>
   <VPageHeader :title="$t('core.setting.title')">
     <template #icon>
-      <IconSettings class="mr-2 self-center" />
+      <IconSettings />
     </template>
   </VPageHeader>
 

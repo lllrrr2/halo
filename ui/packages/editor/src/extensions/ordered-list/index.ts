@@ -1,65 +1,86 @@
-import type { Editor, Range } from "@/tiptap/vue-3";
-import TiptapOrderedList from "@tiptap/extension-ordered-list";
-import type { OrderedListOptions } from "@tiptap/extension-ordered-list";
-import ExtensionListItem from "@tiptap/extension-list-item";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import MdiFormatListNumbered from "~icons/mdi/format-list-numbered";
+import {
+  OrderedList as TiptapOrderedList,
+  type OrderedListOptions,
+} from "@tiptap/extension-list";
 import { markRaw } from "vue";
+import MingcuteListOrderedLine from "~icons/mingcute/list-ordered-line";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import type { Editor, Range } from "@/tiptap";
 import type { ExtensionOptions } from "@/types";
+import { ExtensionListItem } from "../list-item";
 
-const OrderedList = TiptapOrderedList.extend<
-  ExtensionOptions & OrderedListOptions
->({
-  addOptions() {
-    return {
-      ...this.parent?.(),
-      getToolbarItems({ editor }: { editor: Editor }) {
-        return {
-          priority: 140,
-          component: markRaw(ToolbarItem),
-          props: {
-            editor,
-            isActive: editor.isActive("orderedList"),
-            icon: markRaw(MdiFormatListNumbered),
-            title: i18n.global.t("editor.common.ordered_list"),
-            action: () => editor.chain().focus().toggleOrderedList().run(),
-          },
-        };
-      },
-      getCommandMenuItems() {
-        return {
-          priority: 140,
-          icon: markRaw(MdiFormatListNumbered),
-          title: "editor.common.ordered_list",
-          keywords: ["orderedlist", "youxuliebiao"],
-          command: ({ editor, range }: { editor: Editor; range: Range }) => {
-            editor.chain().focus().deleteRange(range).toggleOrderedList().run();
-          },
-        };
-      },
-      getDraggable() {
-        return {
-          getRenderContainer({ dom }) {
-            let container = dom;
-            while (container && !(container.tagName === "LI")) {
-              container = container.parentElement as HTMLElement;
-            }
-            return {
-              el: container,
-              dragDomOffset: {
-                x: -16,
-                y: -1,
-              },
-            };
-          },
-        };
-      },
-    };
-  },
-  addExtensions() {
-    return [ExtensionListItem];
-  },
-});
+export type ExtensionOrderedListOptions = Partial<OrderedListOptions> &
+  ExtensionOptions;
 
-export default OrderedList;
+export const ExtensionOrderedList =
+  TiptapOrderedList.extend<ExtensionOrderedListOptions>({
+    addKeyboardShortcuts() {
+      return defineHaloKeyboardShortcuts(this, [
+        {
+          id: "editor.structure.orderedList",
+          keys: ["Mod-Shift-7"],
+          label: () => i18n.global.t("editor.shortcuts.commands.ordered_list"),
+          category: "structure",
+          priority: 80,
+        },
+      ]);
+    },
+
+    addHaloEditorMetadata() {
+      return {
+        ai: {
+          description: "An ordered list whose item sequence is meaningful.",
+          aliases: ["numbered list"],
+          exposure: "recommended",
+          useWhen: ["Presenting steps, rankings, or another ordered sequence."],
+          avoidWhen: ["Item order is not significant."],
+          attributeGuidance: {
+            start: {
+              description: "Starting ordinal for the first list item.",
+              examples: [1, 3, 10],
+              omitWhen: ["The list starts at 1."],
+            },
+            type: {
+              description: "HTML numbering style.",
+              allowedValues: ["1", "a", "A", "i", "I", null],
+              omitWhen: ["Default decimal numbering is appropriate."],
+            },
+          },
+          generation: {
+            mode: "direct-html",
+          },
+          examples: [
+            "<ol><li><p>First step</p></li><li><p>Second step</p></li></ol>",
+            '<ol start="3" type="I"><li><p>Third numbered item</p></li><li><p>Fourth numbered item</p></li></ol>',
+          ],
+        },
+      };
+    },
+
+    addOptions() {
+      return {
+        ...this.parent?.(),
+        getCommandMenuItems() {
+          return {
+            priority: 140,
+            icon: markRaw(MingcuteListOrderedLine),
+            title: "editor.common.ordered_list",
+            keywords: ["orderedlist", "youxuliebiao"],
+            shortcutId: "editor.structure.orderedList",
+            command: ({ editor, range }: { editor: Editor; range: Range }) => {
+              editor
+                .chain()
+                .focus()
+                .deleteRange(range)
+                .toggleOrderedList()
+                .run();
+            },
+          };
+        },
+      };
+    },
+    addExtensions() {
+      return [ExtensionListItem];
+    },
+  });

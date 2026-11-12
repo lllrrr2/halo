@@ -1,121 +1,107 @@
 <script lang="ts" setup>
-import { useUserStore } from "@/stores/user";
-import { apiClient } from "@/utils/api-client";
-import { relativeTimeTo } from "@/utils/date";
 import type { Notification } from "@halo-dev/api-client";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { Dialog, Toast, VStatusDot } from "@halo-dev/components";
-import { watch } from "vue";
-import { ref } from "vue";
-import { useI18n } from "vue-i18n";
-
-const queryClient = useQueryClient();
-const { t } = useI18n();
+import { VStatusDot } from "@halo-dev/components";
+import { utils } from "@halo-dev/ui-shared";
+import sanitize from "sanitize-html";
+import { computed } from "vue";
 
 const props = withDefaults(
   defineProps<{
     notification: Notification;
     isSelected: boolean;
+    isSelectMode?: boolean;
+    isChecked?: boolean;
   }>(),
-  {}
-);
-
-const { currentUser } = useUserStore();
-
-const isRead = ref();
-
-const { mutate: handleMarkAsRead } = useMutation({
-  mutationKey: ["notification-mark-as-read"],
-  mutationFn: async ({ refetch }: { refetch: boolean }) => {
-    const { data } = await apiClient.notification.markNotificationAsRead({
-      name: props.notification.metadata.name,
-      username: currentUser?.metadata.name as string,
-    });
-
-    if (refetch) {
-      await queryClient.invalidateQueries({ queryKey: ["user-notifications"] });
-    }
-
-    return data;
-  },
-  onSuccess() {
-    isRead.value = true;
-  },
-});
-
-function handleDelete() {
-  Dialog.warning({
-    title: t("core.uc_notification.operations.delete.title"),
-    description: t("core.uc_notification.operations.delete.description"),
-    async onConfirm() {
-      await apiClient.notification.deleteSpecifiedNotification({
-        name: props.notification.metadata.name,
-        username: currentUser?.metadata.name as string,
-      });
-
-      await queryClient.invalidateQueries({ queryKey: ["user-notifications"] });
-
-      Toast.success(t("core.common.toast.delete_success"));
-    },
-  });
-}
-
-watch(
-  () => props.isSelected,
-  (value) => {
-    if (value && props.notification.spec?.unread) {
-      handleMarkAsRead({ refetch: false });
-    }
-  },
   {
-    immediate: true,
+    isSelectMode: false,
+    isChecked: false,
   }
 );
+
+const emit = defineEmits<{
+  read: [notification: Notification];
+  delete: [notification: Notification];
+}>();
+
+const content = computed(() => {
+  // Clean html tags
+  return sanitize(props.notification.spec?.htmlContent || "", {
+    allowedTags: [],
+    allowedAttributes: {},
+  });
+});
 </script>
 <template>
   <div
     class="group relative flex cursor-pointer flex-col gap-2 p-4"
-    :class="{ 'bg-gray-50': isSelected }"
+    :class="{ 'bg-gray-50': isSelected || isChecked }"
   >
     <div
-      v-if="isSelected"
+      v-if="isSelected || isChecked"
       class="absolute inset-y-0 left-0 w-0.5 bg-primary"
     ></div>
-    <div class="flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <!-- Checkbox shown in batch select mode -->
       <div
-        class="truncate text-sm"
-        :class="{ 'font-semibold': notification.spec?.unread && !isRead }"
+        v-if="isSelectMode"
+        class="flex h-4 w-4 flex-none items-center justify-center rounded border transition-colors"
+        :class="
+          isChecked ? 'border-primary bg-primary' : 'border-gray-300 bg-white'
+        "
       >
-        {{ notification.spec?.title }}
+        <svg
+          v-if="isChecked"
+          class="h-3 w-3 text-white"
+          viewBox="0 0 12 12"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M2 6l3 3 5-5"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
       </div>
-      <VStatusDot
-        v-if="notification.metadata.deletionTimestamp"
-        v-tooltip="$t('core.common.status.deleting')"
-        state="warning"
-        animate
-      />
+      <div class="flex min-w-0 flex-1 items-center justify-between">
+        <div
+          class="truncate text-sm"
+          :class="{ 'font-semibold': notification.spec?.unread }"
+        >
+          {{ notification.spec?.title }}
+        </div>
+        <VStatusDot
+          v-if="notification.metadata.deletionTimestamp"
+          v-tooltip="$t('core.common.status.deleting')"
+          state="warning"
+          animate
+        />
+      </div>
     </div>
     <div
-      v-if="notification.spec?.rawContent"
-      class="truncate text-xs text-gray-600"
+      v-if="notification.spec?.htmlContent"
+      class="line-clamp-1 text-xs text-gray-600"
     >
-      {{ notification.spec.rawContent }}
+      {{ content }}
     </div>
     <div class="flex h-6 items-end justify-between">
       <div class="text-xs text-gray-600">
-        {{ relativeTimeTo(notification.metadata.creationTimestamp) }}
+        {{ utils.date.timeAgo(notification.metadata.creationTimestamp) }}
       </div>
-      <div class="hidden space-x-2 group-hover:block">
+      <!-- Action buttons: hidden in batch select mode -->
+      <div v-if="!isSelectMode" class="hidden space-x-2 group-hover:block">
         <span
-          v-if="notification.spec?.unread && !isRead"
+          v-if="notification.spec?.unread"
           class="text-sm text-gray-600 hover:text-gray-900"
-          @click.stop="handleMarkAsRead({ refetch: true })"
+          @click.stop="emit('read', notification)"
         >
           {{ $t("core.uc_notification.operations.mark_as_read.button") }}
         </span>
         <span
           class="text-sm text-red-600 hover:text-red-700"
-          @click.stop="handleDelete"
+          @click.stop="emit('delete', notification)"
         >
           {{ $t("core.common.buttons.delete") }}
         </span>

@@ -27,7 +27,6 @@ class ThemeTest {
         metadata.setName("test-theme");
         theme.setMetadata(metadata);
 
-
         Theme.ThemeSpec themeSpec = new Theme.ThemeSpec();
         theme.setSpec(themeSpec);
         themeSpec.setDisplayName("test-theme");
@@ -43,9 +42,6 @@ class ThemeTest {
         themeSpec.setDescription("test-description");
         themeSpec.setConfigMapName("test-config-map");
         themeSpec.setSettingName("test-setting");
-
-        themeSpec.setVersion(null);
-        themeSpec.setRequires(null);
         JSONAssert.assertEquals("""
                 {
                     "spec": {
@@ -69,14 +65,28 @@ class ThemeTest {
                         "name": "test-theme"
                     }
                 }
-                """,
-            JsonUtils.objectToJson(theme),
-            true);
+                """, JsonUtils.objectToJson(theme), true);
 
         themeSpec.setVersion("1.0.0");
         themeSpec.setRequires("2.0.0");
         assertThat(themeSpec.getVersion()).isEqualTo("1.0.0");
         assertThat(themeSpec.getRequires()).isEqualTo("2.0.0");
+    }
+
+    @Test
+    void themeStatusScreenshot() throws JSONException {
+        Theme theme = new Theme();
+        Theme.ThemeStatus status = new Theme.ThemeStatus();
+        status.setScreenshot("/themes/test-theme/screenshot.png");
+        theme.setStatus(status);
+
+        JSONAssert.assertEquals("""
+                {
+                    "status": {
+                        "screenshot": "/themes/test-theme/screenshot.png"
+                    }
+                }
+                """, JsonUtils.objectToJson(theme), false);
     }
 
     @Test
@@ -109,8 +119,7 @@ class ThemeTest {
                     screenshot: foo.png
                     file: page_template_1.html
             """;
-        List<Unstructured> unstructuredList =
-            new YamlUnstructuredLoader(new InMemoryResource(themeYaml)).load();
+        List<Unstructured> unstructuredList = new YamlUnstructuredLoader(new InMemoryResource(themeYaml)).load();
         assertThat(unstructuredList).hasSize(1);
         Theme theme = Unstructured.OBJECT_MAPPER.convertValue(unstructuredList.get(0), Theme.class);
         assertThat(theme).isNotNull();
@@ -145,8 +154,6 @@ class ThemeTest {
                             "file": "page_template_1.html"
                         }]
                 }
-                """,
-            JsonUtils.objectToJson(theme.getSpec().getCustomTemplates()),
-            true);
+                """, JsonUtils.objectToJson(theme.getSpec().getCustomTemplates()), true);
     }
 }

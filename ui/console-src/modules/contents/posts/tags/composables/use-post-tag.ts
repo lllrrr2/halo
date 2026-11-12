@@ -1,8 +1,15 @@
-import { apiClient } from "@/utils/api-client";
-import type { Tag } from "@halo-dev/api-client";
-import { ref, watch, type Ref } from "vue";
+import type {
+  Tag,
+  TagV1alpha1ConsoleApiListPostTagsRequest,
+} from "@halo-dev/api-client";
+import {
+  consoleApiClient,
+  coreApiClient,
+  paginate,
+} from "@halo-dev/api-client";
 import { Dialog, Toast } from "@halo-dev/components";
 import { useQuery, type QueryObserverResult } from "@tanstack/vue-query";
+import { ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 interface usePostTagReturn {
@@ -39,7 +46,7 @@ export function usePostTag(filterOptions?: {
   } = useQuery({
     queryKey: ["post-tags", sort, page, size, keyword],
     queryFn: async () => {
-      const { data } = await apiClient.tag.listPostTags({
+      const { data } = await consoleApiClient.content.tag.listPostTags({
         page: page?.value || 0,
         size: size?.value || 0,
         sort: [sort?.value as string].filter(Boolean) || [
@@ -55,10 +62,10 @@ export function usePostTag(filterOptions?: {
       return data.items;
     },
     refetchInterval(data) {
-      const abnormalTags = data?.filter(
+      const hasAbnormalTag = data?.some(
         (tag) => !!tag.metadata.deletionTimestamp || !tag.status?.permalink
       );
-      return abnormalTags?.length ? 1000 : false;
+      return hasAbnormalTag ? 1000 : false;
     },
   });
 
@@ -71,7 +78,7 @@ export function usePostTag(filterOptions?: {
       cancelText: t("core.common.buttons.cancel"),
       onConfirm: async () => {
         try {
-          await apiClient.extension.tag.deletecontentHaloRunV1alpha1Tag({
+          await coreApiClient.content.tag.deleteTag({
             name: tag.metadata.name,
           });
 
@@ -97,7 +104,7 @@ export function usePostTag(filterOptions?: {
           try {
             await Promise.all(
               tagNames.map((tagName) => {
-                apiClient.extension.tag.deletecontentHaloRunV1alpha1Tag({
+                coreApiClient.content.tag.deleteTag({
                   name: tagName,
                 });
               })
@@ -135,4 +142,25 @@ export function usePostTag(filterOptions?: {
     handleDelete,
     handleDeleteInBatch,
   };
+}
+
+export function useAllPostTagsQuery() {
+  return useQuery({
+    queryKey: ["core:post-tags:all"],
+    queryFn: async () => {
+      return await paginate<TagV1alpha1ConsoleApiListPostTagsRequest, Tag>(
+        (params) => consoleApiClient.content.tag.listPostTags(params),
+        {
+          sort: ["metadata.creationTimestamp,desc"],
+          size: 1000,
+        }
+      );
+    },
+    refetchInterval(data) {
+      const hasAbnormalTag = data?.some(
+        (tag) => !!tag.metadata.deletionTimestamp || !tag.status?.permalink
+      );
+      return hasAbnormalTag ? 1000 : false;
+    },
+  });
 }

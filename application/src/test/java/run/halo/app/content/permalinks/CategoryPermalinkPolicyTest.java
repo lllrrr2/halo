@@ -12,7 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import run.halo.app.core.extension.content.Category;
 import run.halo.app.extension.Metadata;
 import run.halo.app.infra.ExternalUrlSupplier;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 
 /**
  * Tests for {@link CategoryPermalinkPolicy}.
@@ -27,14 +27,13 @@ class CategoryPermalinkPolicyTest {
     private ExternalUrlSupplier externalUrlSupplier;
 
     @Mock
-    private SystemConfigurableEnvironmentFetcher environmentFetcher;
+    private SystemConfigFetcher environmentFetcher;
 
     private CategoryPermalinkPolicy categoryPermalinkPolicy;
 
     @BeforeEach
     void setUp() {
-        categoryPermalinkPolicy =
-            new CategoryPermalinkPolicy(externalUrlSupplier, environmentFetcher);
+        categoryPermalinkPolicy = new CategoryPermalinkPolicy(externalUrlSupplier, environmentFetcher);
     }
 
     @Test

@@ -7,7 +7,6 @@ import static run.halo.app.core.extension.User.VERSION;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
-import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -15,18 +14,14 @@ import run.halo.app.extension.AbstractExtension;
 import run.halo.app.extension.GVK;
 
 /**
- * The extension represents user details of Halo.
+ * User extension that stores profile, authentication, and account state for a Halo user.
  *
  * @author johnniang
  */
 @Data
 @ToString(callSuper = true)
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = GROUP,
-    version = VERSION,
-    kind = KIND,
-    singular = "user",
-    plural = "users")
+@GVK(group = GROUP, version = VERSION, kind = KIND, singular = "user", plural = "users")
 public class User extends AbstractExtension {
 
     public static final String GROUP = "";
@@ -39,77 +34,68 @@ public class User extends AbstractExtension {
 
     public static final String EMAIL_TO_VERIFY = "halo.run/email-to-verify";
 
-    public static final String LAST_AVATAR_ATTACHMENT_NAME_ANNO =
-        "halo.run/last-avatar-attachment-name";
+    public static final String LAST_AVATAR_ATTACHMENT_NAME_ANNO = "halo.run/last-avatar-attachment-name";
 
     public static final String AVATAR_ATTACHMENT_NAME_ANNO = "halo.run/avatar-attachment-name";
 
     public static final String HIDDEN_USER_LABEL = "halo.run/hidden-user";
 
+    public static final String REQUEST_TO_UPDATE = "halo.run/request-to-update";
+
+    /** Desired user profile and authentication settings. */
     @Schema(requiredMode = REQUIRED)
     private UserSpec spec = new UserSpec();
 
+    /** Observed user state derived by the application. */
     private UserStatus status = new UserStatus();
 
+    /** Desired user profile and authentication settings. */
     @Data
     public static class UserSpec {
 
+        /** Display name shown for the user. */
         @Schema(requiredMode = REQUIRED)
         private String displayName;
 
+        /** Avatar URL or attachment URI for the user. */
         private String avatar;
 
-        @Schema(requiredMode = REQUIRED)
+        /** Email address used for sign-in and notifications. */
         private String email;
 
+        /** Whether the email address has been verified. */
         private boolean emailVerified;
 
+        /** Phone number associated with the user. */
         private String phone;
 
+        /** Password hash or encoded password value. */
         private String password;
 
+        /** User biography shown on profile surfaces. */
         private String bio;
 
+        /** Time when the user registered. */
         private Instant registeredAt;
 
+        /** Whether two-factor authentication is enabled for this user. */
         private Boolean twoFactorAuthEnabled;
 
+        /** Encrypted TOTP secret used for two-factor authentication. */
         private String totpEncryptedSecret;
 
+        /** Whether the user account is disabled. */
         private Boolean disabled;
 
+        /** Maximum number of login history entries retained for this user. */
         private Integer loginHistoryLimit;
-
     }
 
+    /** Observed user state derived by the application. */
     @Data
     public static class UserStatus {
 
-        private Instant lastLoginAt;
-
+        /** Public permalink of the user's profile or author page. */
         private String permalink;
-
-        private List<LoginHistory> loginHistories;
-
     }
-
-    @Data
-    public static class LoginHistory {
-
-        @Schema(requiredMode = REQUIRED)
-        private Instant loginAt;
-
-        @Schema(requiredMode = REQUIRED)
-        private String sourceIp;
-
-        @Schema(requiredMode = REQUIRED)
-        private String userAgent;
-
-        @Schema(requiredMode = REQUIRED)
-        private Boolean successful;
-
-        private String reason;
-
-    }
-
 }

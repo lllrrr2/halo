@@ -1,23 +1,22 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import { computed, ref } from "vue";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { apiClient } from "@/utils/api-client";
 import type { VerifyCodeRequest } from "@halo-dev/api-client";
-import { useUserStore } from "@/stores/user";
+import { ucApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { stores } from "@halo-dev/ui-shared";
+import { useMutation } from "@tanstack/vue-query";
 import { useIntervalFn } from "@vueuse/shared";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
-const queryClient = useQueryClient();
 const { t } = useI18n();
 
-const { currentUser, fetchCurrentUser } = useUserStore();
+const { currentUser, fetchCurrentUser } = stores.currentUser();
 
 const emit = defineEmits<{
   (event: "close"): void;
 }>();
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
 // count down
 const timer = ref(0);
@@ -35,7 +34,7 @@ const { pause, resume, isActive } = useIntervalFn(
   }
 );
 
-const email = ref(currentUser?.spec.email);
+const email = ref(currentUser?.user?.spec.email);
 
 const { mutate: sendVerifyCode, isLoading: isSending } = useMutation({
   mutationKey: ["send-verify-code"],
@@ -48,7 +47,7 @@ const { mutate: sendVerifyCode, isLoading: isSending } = useMutation({
       );
       throw new Error("email is empty");
     }
-    return await apiClient.user.sendEmailVerificationCode({
+    return await ucApiClient.user.currentUser.sendMyEmailVerificationCode({
       emailVerifyRequest: {
         email: email.value,
       },
@@ -80,7 +79,7 @@ const sendVerifyCodeButtonText = computed(() => {
 const { mutate: verifyEmail, isLoading: isVerifying } = useMutation({
   mutationKey: ["verify-email"],
   mutationFn: async ({ password, code }: VerifyCodeRequest) => {
-    return await apiClient.user.verifyEmail({
+    return await ucApiClient.user.currentUser.verifyMyEmail({
       verifyCodeRequest: {
         password,
         code,
@@ -91,9 +90,8 @@ const { mutate: verifyEmail, isLoading: isVerifying } = useMutation({
     Toast.success(
       t("core.uc_profile.email_verify_modal.operations.verify.toast_success")
     );
-    queryClient.invalidateQueries({ queryKey: ["user-detail"] });
     fetchCurrentUser();
-    modal.value.close();
+    modal.value?.close();
   },
 });
 
@@ -106,7 +104,7 @@ function handleVerify({ password, code }: VerifyCodeRequest) {
   <VModal
     ref="modal"
     :title="
-      currentUser?.spec.emailVerified
+      currentUser?.user.spec.emailVerified
         ? $t('core.uc_profile.email_verify_modal.titles.modify')
         : $t('core.uc_profile.email_verify_modal.titles.verify')
     "
@@ -122,7 +120,7 @@ function handleVerify({ password, code }: VerifyCodeRequest) {
         v-model="email"
         type="email"
         :label="
-          currentUser?.spec.emailVerified
+          currentUser?.user.spec.emailVerified
             ? $t('core.uc_profile.email_verify_modal.fields.new_email.label')
             : $t('core.uc_profile.email_verify_modal.fields.email.label')
         "
@@ -163,7 +161,7 @@ function handleVerify({ password, code }: VerifyCodeRequest) {
         >
           {{ $t("core.common.buttons.verify") }}
         </VButton>
-        <VButton @click="modal.close()">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.close_and_shortcut") }}
         </VButton>
       </VSpace>

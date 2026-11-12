@@ -2,13 +2,13 @@
 import type { ComputedRef } from "vue";
 import { computed, provide, useSlots } from "vue";
 import { VTabbar } from "./index";
-import type { Direction, Type } from "./interface";
+import type { TabsDirection, TabsType } from "./types";
 
 const props = withDefaults(
   defineProps<{
     activeId?: number | string;
-    type?: Type;
-    direction?: Direction;
+    type?: TabsType;
+    direction?: TabsDirection;
     idKey?: string;
     labelKey?: string;
   }>(),
@@ -34,12 +34,15 @@ const emit = defineEmits<{
 const slots = useSlots();
 
 const tabItems = computed(() => {
-  return slots.default?.().map(({ props: slotProps }) => {
-    return {
-      id: slotProps?.[props.idKey],
-      label: slotProps?.[props.labelKey],
-    };
-  });
+  return slots
+    .default?.()
+    .map(({ props: slotProps }) => {
+      return {
+        id: slotProps?.[props.idKey],
+        label: slotProps?.[props.labelKey],
+      };
+    })
+    .filter((item) => item.id !== undefined && item.label !== undefined);
 });
 
 const classes = computed(() => {

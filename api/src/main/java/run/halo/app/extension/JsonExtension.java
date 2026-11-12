@@ -3,12 +3,7 @@ package run.halo.app.extension;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonDeserializer;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.node.LongNode;
@@ -19,16 +14,18 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
- * JsonExtension is representation an extension using ObjectNode. This extension is preparing for
- * patching in the future.
+ * JsonExtension is representation an extension using ObjectNode. This extension is preparing for patching in the
+ * future.
  *
  * @author johnniang
  */
 @JsonSerialize(using = JsonExtension.ObjectNodeExtensionSerializer.class)
 @JsonDeserialize(using = JsonExtension.ObjectNodeExtensionDeSerializer.class)
-class JsonExtension implements Extension {
+@Deprecated(forRemoval = true, since = "2.23.0")
+public class JsonExtension implements Extension {
 
     private final ObjectMapper objectMapper;
 
@@ -48,7 +45,7 @@ class JsonExtension implements Extension {
     }
 
     @Override
-    public MetadataOperator getMetadata() {
+    public @Nullable MetadataOperator getMetadata() {
         var metadataNode = objectNode.get("metadata");
         if (metadataNode == null) {
             return null;
@@ -57,7 +54,7 @@ class JsonExtension implements Extension {
     }
 
     @Override
-    public String getApiVersion() {
+    public @Nullable String getApiVersion() {
         var apiVersionNode = objectNode.get("apiVersion");
         return apiVersionNode == null ? null : apiVersionNode.asText();
     }
@@ -85,18 +82,16 @@ class JsonExtension implements Extension {
     public static class ObjectNodeExtensionSerializer extends JsonSerializer<JsonExtension> {
 
         @Override
-        public void serialize(JsonExtension value, JsonGenerator gen,
-            SerializerProvider serializers) throws IOException {
+        public void serialize(JsonExtension value, JsonGenerator gen, SerializerProvider serializers)
+                throws IOException {
             gen.writeTree(value.objectNode);
         }
     }
 
-    public static class ObjectNodeExtensionDeSerializer
-        extends JsonDeserializer<JsonExtension> {
+    public static class ObjectNodeExtensionDeSerializer extends JsonDeserializer<JsonExtension> {
 
         @Override
-        public JsonExtension deserialize(JsonParser p, DeserializationContext ctxt)
-            throws IOException {
+        public JsonExtension deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
             var mapper = (ObjectMapper) p.getCodec();
             var treeNode = mapper.readTree(p);
             return new JsonExtension(mapper, (ObjectNode) treeNode);
@@ -110,6 +105,15 @@ class JsonExtension implements Extension {
      */
     public ObjectNode getInternal() {
         return objectNode;
+    }
+
+    /**
+     * Get object mapper.
+     *
+     * @return object mapper
+     */
+    public ObjectMapper getObjectMapper() {
+        return objectMapper;
     }
 
     public MetadataOperator getMetadataOrCreate() {
@@ -158,15 +162,13 @@ class JsonExtension implements Extension {
         @Override
         public Map<String, String> getLabels() {
             var labelsNode = objectNode.get("labels");
-            return objectMapper.convertValue(labelsNode, new TypeReference<>() {
-            });
+            return objectMapper.convertValue(labelsNode, new TypeReference<>() {});
         }
 
         @Override
         public Map<String, String> getAnnotations() {
             var annotationsNode = objectNode.get("annotations");
-            return objectMapper.convertValue(annotationsNode, new TypeReference<>() {
-            });
+            return objectMapper.convertValue(annotationsNode, new TypeReference<>() {});
         }
 
         @Override
@@ -187,8 +189,7 @@ class JsonExtension implements Extension {
 
         @Override
         public Set<String> getFinalizers() {
-            return objectMapper.convertValue(objectNode.get("finalizers"), new TypeReference<>() {
-            });
+            return objectMapper.convertValue(objectNode.get("finalizers"), new TypeReference<>() {});
         }
 
         @Override
@@ -245,6 +246,21 @@ class JsonExtension implements Extension {
             if (finalizers != null) {
                 objectNode.set("finalizers", objectMapper.valueToTree(finalizers));
             }
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            ObjectNodeMetadata that = (ObjectNodeMetadata) o;
+            return Objects.equals(objectNode, that.objectNode);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(objectNode);
         }
     }
 }

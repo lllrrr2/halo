@@ -1,19 +1,24 @@
-import type { Attachment, Group, Policy } from "@halo-dev/api-client";
-import { computed, nextTick, type Ref } from "vue";
-import { ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
+import type { Attachment } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import { Dialog, Toast } from "@halo-dev/components";
 import { useQuery } from "@tanstack/vue-query";
+import {
+  computed,
+  nextTick,
+  ref,
+  watch,
+  type ComputedRef,
+  type Ref,
+} from "vue";
 import { useI18n } from "vue-i18n";
-import { useClipboard } from "@vueuse/core";
-import { matchMediaType } from "@/utils/media-type";
 
 interface useAttachmentControlReturn {
   attachments: Ref<Attachment[] | undefined>;
   isLoading: Ref<boolean>;
   isFetching: Ref<boolean>;
   selectedAttachment: Ref<Attachment | undefined>;
-  selectedAttachments: Ref<Set<Attachment>>;
+  selectedAttachments: ComputedRef<Attachment[]>;
+  selectedAttachmentNames: Ref<Set<string>>;
   checkedAll: Ref<boolean>;
   total: Ref<number>;
   handleFetchAttachments: () => void;
@@ -27,9 +32,10 @@ interface useAttachmentControlReturn {
 }
 
 export function useAttachmentControl(filterOptions: {
-  policy?: Ref<Policy | undefined>;
-  group?: Ref<Group | undefined>;
+  policyName?: Ref<string | undefined>;
+  groupName?: Ref<string | undefined>;
   user?: Ref<string | undefined>;
+  accepts?: Ref<string[]>;
   keyword?: Ref<string | undefined>;
   sort?: Ref<string | undefined>;
   page: Ref<number>;
@@ -37,10 +43,11 @@ export function useAttachmentControl(filterOptions: {
 }): useAttachmentControlReturn {
   const { t } = useI18n();
 
-  const { user, policy, group, keyword, sort, page, size } = filterOptions;
+  const { user, policyName, groupName, keyword, sort, page, size, accepts } =
+    filterOptions;
 
   const selectedAttachment = ref<Attachment>();
-  const selectedAttachments = ref<Set<Attachment>>(new Set<Attachment>());
+  const selectedAttachmentNames = ref<Set<string>>(new Set<string>());
   const checkedAll = ref(false);
 
   const total = ref(0);
@@ -48,14 +55,24 @@ export function useAttachmentControl(filterOptions: {
   const hasNext = ref(false);
 
   const { data, isLoading, isFetching, refetch } = useQuery<Attachment[]>({
-    queryKey: ["attachments", policy, keyword, group, user, page, size, sort],
+    queryKey: [
+      "attachments",
+      policyName,
+      keyword,
+      groupName,
+      user,
+      accepts,
+      page,
+      size,
+      sort,
+    ],
     queryFn: async () => {
-      const isUnGrouped = group?.value?.metadata.name === "ungrouped";
+      const isUnGrouped = groupName?.value === "ungrouped";
 
       const fieldSelectorMap: Record<string, string | undefined> = {
-        "spec.policyName": policy?.value?.metadata.name,
+        "spec.policyName": policyName?.value,
         "spec.ownerName": user?.value,
-        "spec.groupName": isUnGrouped ? undefined : group?.value?.metadata.name,
+        "spec.groupName": isUnGrouped ? undefined : groupName?.value,
       };
 
       const fieldSelector = Object.entries(fieldSelectorMap)
@@ -66,14 +83,16 @@ export function useAttachmentControl(filterOptions: {
         })
         .filter(Boolean) as string[];
 
-      const { data } = await apiClient.attachment.searchAttachments({
-        fieldSelector,
-        page: page.value,
-        size: size.value,
-        ungrouped: isUnGrouped,
-        keyword: keyword?.value,
-        sort: [sort?.value as string].filter(Boolean),
-      });
+      const { data } =
+        await consoleApiClient.storage.attachment.searchAttachments({
+          fieldSelector,
+          page: page.value,
+          size: size.value,
+          ungrouped: isUnGrouped,
+          accepts: accepts?.value,
+          keyword: keyword?.value,
+          sort: [sort?.value as string].filter(Boolean),
+        });
 
       total.value = data.total;
       hasPrevious.value = data.hasPrevious;
@@ -82,10 +101,10 @@ export function useAttachmentControl(filterOptions: {
       return data.items;
     },
     refetchInterval(data) {
-      const deletingAttachments = data?.filter(
+      const hasDeletingAttachment = data?.some(
         (attachment) => !!attachment.metadata.deletionTimestamp
       );
-      return deletingAttachments?.length ? 1000 : false;
+      return hasDeletingAttachment ? 1000 : false;
     },
   });
 
@@ -144,17 +163,15 @@ export function useAttachmentControl(filterOptions: {
       cancelText: t("core.common.buttons.cancel"),
       onConfirm: async () => {
         try {
-          const promises = Array.from(selectedAttachments.value).map(
-            (attachment) => {
-              return apiClient.extension.storage.attachment.deletestorageHaloRunV1alpha1Attachment(
-                {
-                  name: attachment.metadata.name,
-                }
-              );
+          const promises = Array.from(selectedAttachmentNames.value).map(
+            (name) => {
+              return coreApiClient.storage.attachment.deleteAttachment({
+                name,
+              });
             }
           );
           await Promise.all(promises);
-          selectedAttachments.value.clear();
+          selectedAttachmentNames.value.clear();
 
           Toast.success(t("core.common.toast.delete_success"));
         } catch (e) {
@@ -169,44 +186,47 @@ export function useAttachmentControl(filterOptions: {
   const handleCheckAll = (checkAll: boolean) => {
     if (checkAll) {
       data.value?.forEach((attachment) => {
-        selectedAttachments.value.add(attachment);
+        selectedAttachmentNames.value.add(attachment.metadata.name);
       });
     } else {
-      selectedAttachments.value.clear();
+      selectedAttachmentNames.value.clear();
     }
   };
 
   const handleSelect = async (attachment: Attachment | undefined) => {
     if (!attachment) return;
-    if (selectedAttachments.value.has(attachment)) {
-      selectedAttachments.value.delete(attachment);
+    if (selectedAttachmentNames.value.has(attachment.metadata.name)) {
+      selectedAttachmentNames.value.delete(attachment.metadata.name);
       return;
     }
-    selectedAttachments.value.add(attachment);
+    selectedAttachmentNames.value.add(attachment.metadata.name);
   };
 
   watch(
-    () => selectedAttachments.value.size,
+    () => selectedAttachmentNames.value.size,
     (newValue) => {
       checkedAll.value = newValue === data.value?.length;
     }
   );
 
   const isChecked = (attachment: Attachment) => {
-    return (
-      attachment.metadata.name === selectedAttachment.value?.metadata.name ||
-      Array.from(selectedAttachments.value)
-        .map((item) => item.metadata.name)
-        .includes(attachment.metadata.name)
-    );
+    return selectedAttachmentNames.value.has(attachment.metadata.name);
   };
 
   const handleReset = () => {
     page.value = 1;
     selectedAttachment.value = undefined;
-    selectedAttachments.value.clear();
+    selectedAttachmentNames.value.clear();
     checkedAll.value = false;
   };
+
+  const selectedAttachments = computed(() => {
+    return (
+      data.value?.filter((attachment) =>
+        selectedAttachmentNames.value.has(attachment.metadata.name)
+      ) || []
+    );
+  });
 
   return {
     attachments: data,
@@ -214,6 +234,7 @@ export function useAttachmentControl(filterOptions: {
     isFetching,
     selectedAttachment,
     selectedAttachments,
+    selectedAttachmentNames,
     checkedAll,
     total,
     handleFetchAttachments: refetch,
@@ -224,73 +245,5 @@ export function useAttachmentControl(filterOptions: {
     handleSelect,
     isChecked,
     handleReset,
-  };
-}
-
-export function useAttachmentPermalinkCopy(
-  attachment: Ref<Attachment | undefined>
-) {
-  const { copy } = useClipboard({ legacy: true });
-  const { t } = useI18n();
-
-  const mediaType = computed(() => {
-    return attachment.value?.spec.mediaType;
-  });
-
-  const isImage = computed(() => {
-    return mediaType.value && matchMediaType(mediaType.value, "image/*");
-  });
-
-  const isVideo = computed(() => {
-    return mediaType.value && matchMediaType(mediaType.value, "video/*");
-  });
-
-  const isAudio = computed(() => {
-    return mediaType.value && matchMediaType(mediaType.value, "audio/*");
-  });
-
-  const htmlText = computed(() => {
-    const { permalink } = attachment.value?.status || {};
-    const { displayName } = attachment.value?.spec || {};
-
-    if (isImage.value) {
-      return `<img src="${permalink}" alt="${displayName}" />`;
-    } else if (isVideo.value) {
-      return `<video src="${permalink}"></video>`;
-    } else if (isAudio.value) {
-      return `<audio src="${permalink}"></audio>`;
-    }
-    return `<a href="${permalink}">${displayName}</a>`;
-  });
-
-  const markdownText = computed(() => {
-    const { permalink } = attachment.value?.status || {};
-    const { displayName } = attachment.value?.spec || {};
-    if (isImage.value) {
-      return `![${displayName}](${permalink})`;
-    }
-    return `[${displayName}](${permalink})`;
-  });
-
-  const handleCopy = (format: "markdown" | "html" | "url") => {
-    const { permalink } = attachment.value?.status || {};
-
-    if (!permalink) return;
-
-    if (format === "url") {
-      copy(permalink);
-    } else if (format === "markdown") {
-      copy(markdownText.value);
-    } else if (format === "html") {
-      copy(htmlText.value);
-    }
-
-    Toast.success(t("core.common.toast.copy_success"));
-  };
-
-  return {
-    htmlText,
-    markdownText,
-    handleCopy,
   };
 }

@@ -9,25 +9,37 @@ import run.halo.app.core.extension.content.Reply;
 import run.halo.app.extension.Metadata;
 
 /**
- * A request parameter object for {@link Reply}.
+ * Request body for creating a {@link Reply}.
  *
  * @author guqing
  * @since 2.0.0
  */
+@Schema(description = "Reply creation payload for console comment APIs.")
 @Data
 public class ReplyRequest {
 
-    @Schema(requiredMode = REQUIRED, minLength = 1)
+    @Schema(description = "Original reply text submitted by the editor.", requiredMode = REQUIRED, minLength = 1)
     private String raw;
 
-    @Schema(requiredMode = REQUIRED, minLength = 1)
+    @Schema(
+            description = "Rendered HTML content for the reply. Unsafe HTML is rejected.",
+            requiredMode = REQUIRED,
+            minLength = 1)
     private String content;
 
-    @Schema(defaultValue = "false")
+    @Schema(
+            description =
+                    "Whether to notify the owner of future replies. Only an explicit false disables notifications.",
+            defaultValue = "true")
     private Boolean allowNotification;
 
+    @Schema(description = "Whether the reply should be hidden from normal display.", defaultValue = "false")
+    private Boolean hidden;
+
+    /** Guest/email owner information. If omitted, Halo uses the current authenticated user. */
     private CommentEmailOwner owner;
 
+    /** Metadata name of the reply being quoted, if this reply quotes another reply. */
     private String quoteReply;
 
     /**
@@ -45,6 +57,7 @@ public class ReplyRequest {
         spec.setRaw(raw);
         spec.setContent(content);
         spec.setAllowNotification(allowNotification);
+        spec.setHidden(hidden);
         spec.setQuoteReply(quoteReply);
 
         if (owner != null) {

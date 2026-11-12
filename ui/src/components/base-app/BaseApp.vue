@@ -1,23 +1,25 @@
 <script lang="ts" setup>
-import { RouterView } from "vue-router";
-import { computed, inject, onMounted, reactive } from "vue";
+import type { FormKitConfig } from "@formkit/core";
+import { stores } from "@halo-dev/ui-shared";
 import { useFavicon } from "@vueuse/core";
+import type { OverlayScrollbars } from "overlayscrollbars";
 import {
   useOverlayScrollbars,
   type UseOverlayScrollbarsParams,
 } from "overlayscrollbars-vue";
-import type { FormKitConfig } from "@formkit/core";
-import { i18n } from "@/locales";
-import { useGlobalInfoStore } from "@/stores/global-info";
 import { storeToRefs } from "pinia";
+import { computed, inject, onMounted, provide, reactive } from "vue";
+import { RouterView } from "vue-router";
+import SudoConfirmModal from "@/components/sudo/SudoConfirmModal.vue";
 import { useAppTitle } from "@/composables/use-title";
+import { i18n } from "@/locales";
 
 useAppTitle();
 
-const { globalInfo } = storeToRefs(useGlobalInfoStore());
+const { globalInfo } = storeToRefs(stores.globalInfo());
 
 // Favicon
-const defaultFavicon = "/console/favicon.ico";
+const defaultFavicon = "/ui-assets/favicon.ico";
 const favicon = computed(() => {
   return globalInfo.value?.favicon || defaultFavicon;
 });
@@ -35,10 +37,12 @@ const reactiveParams = reactive<UseOverlayScrollbarsParams>({
   },
   defer: true,
 });
-const [initialize] = useOverlayScrollbars(reactiveParams);
+const [initialize, instance] = useOverlayScrollbars(reactiveParams);
 onMounted(() => {
   if (body) initialize({ target: body });
 });
+
+provide<() => OverlayScrollbars | null>("bodyScrollInstance", instance);
 
 // setup formkit locale
 // see https://formkit.com/essentials/internationalization
@@ -77,6 +81,7 @@ window.addEventListener(
 
 <template>
   <RouterView />
+  <SudoConfirmModal />
 </template>
 
 <style lang="scss">

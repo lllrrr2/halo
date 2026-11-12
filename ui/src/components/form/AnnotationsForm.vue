@@ -1,23 +1,18 @@
 <script lang="ts" setup>
 import {
-  type FormKitNode,
-  type FormKitSchemaCondition,
-  type FormKitSchemaNode,
   reset,
   submitForm,
+  type FormKitNode,
+  type FormKitSchemaDefinition,
+  type FormKitSchemaNode,
 } from "@formkit/core";
-
-import { IconArrowRight } from "@halo-dev/components";
-
-import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-import type { AnnotationSetting } from "@halo-dev/api-client";
-import { cloneDeep } from "lodash-es";
 import { getValidationMessages } from "@formkit/validation";
-import { useThemeStore } from "@console/stores/theme";
-import { randomUUID } from "@/utils/id";
-
-const themeStore = useThemeStore();
+import type { AnnotationSetting } from "@halo-dev/api-client";
+import { ucApiClient } from "@halo-dev/api-client";
+import { IconArrowRight } from "@halo-dev/components";
+import { utils } from "@halo-dev/ui-shared";
+import { cloneDeep } from "es-toolkit";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 function keyValidationRule(node: FormKitNode) {
   const validAnnotations = [
@@ -35,60 +30,49 @@ const props = withDefaults(
     value?: {
       [key: string]: string;
     } | null;
+    formData?: unknown;
   }>(),
   {
     value: null,
+    formData: undefined,
   }
 );
 
 const annotationSettings = ref<AnnotationSetting[]>([] as AnnotationSetting[]);
 
-const avaliableAnnotationSettings = computed(() => {
-  return annotationSettings.value.filter((setting) => {
-    if (!setting.metadata.labels?.["theme.halo.run/theme-name"]) {
-      return true;
-    }
-    return (
-      setting.metadata.labels?.["theme.halo.run/theme-name"] ===
-      themeStore.activatedTheme?.metadata.name
-    );
-  });
-});
-
 const handleFetchAnnotationSettings = async () => {
   try {
     const { data } =
-      await apiClient.extension.annotationSetting.listv1alpha1AnnotationSetting(
-        {
-          labelSelector: [
-            `halo.run/target-ref=${[props.group, props.kind].join("/")}`,
-          ],
-        }
-      );
-    annotationSettings.value = data.items;
+      await ucApiClient.core.annotationSetting.listAvailableAnnotationSettings({
+        targetRef: `${[props.group, props.kind].join("/")}`,
+      });
+    annotationSettings.value = data;
   } catch (error) {
     console.error("Failed to fetch annotation settings", error);
   }
 };
 
-const specFormId = `${randomUUID()}-specForm`;
-const customFormId = `${randomUUID()}-customForm`;
+const specFormId = `${utils.id.uuid()}-specForm`;
+const customFormId = `${utils.id.uuid()}-customForm`;
 const annotations = ref<{
   [key: string]: string;
 }>({});
 const customAnnotationsState = ref<{ key: string; value: string }[]>([]);
 
 const customAnnotations = computed(() => {
-  return customAnnotationsState.value.reduce((acc, cur) => {
-    acc[cur.key] = cur.value;
-    return acc;
-  }, {} as { [key: string]: string });
+  return customAnnotationsState.value.reduce(
+    (acc, cur) => {
+      acc[cur.key] = cur.value;
+      return acc;
+    },
+    {} as { [key: string]: string }
+  );
 });
 
 const handleProcessCustomAnnotations = () => {
   let formSchemas: FormKitSchemaNode[] = [];
 
-  avaliableAnnotationSettings.value.forEach((annotationSetting) => {
+  annotationSettings.value.forEach((annotationSetting) => {
     formSchemas = formSchemas.concat(
       annotationSetting.spec?.formSchema as FormKitSchemaNode[]
     );
@@ -135,12 +119,15 @@ const handleProcessCustomAnnotations = () => {
       }
     })
     .filter(Boolean)
-    .reduce((acc, cur) => {
-      if (cur) {
-        acc[cur.key] = cur.value;
-      }
-      return acc;
-    }, {} as { [key: string]: string });
+    .reduce(
+      (acc, cur) => {
+        if (cur) {
+          acc[cur.key] = cur.value;
+        }
+        return acc;
+      },
+      {} as { [key: string]: string }
+    );
 };
 
 onMounted(async () => {
@@ -162,12 +149,11 @@ watch(
 );
 
 // submit
-
 const specFormInvalid = ref(true);
 const customFormInvalid = ref(true);
 
 const handleSubmit = async () => {
-  if (avaliableAnnotationSettings.value.length) {
+  if (annotationSettings.value.length) {
     submitForm(specFormId);
   } else {
     specFormInvalid.value = false;
@@ -210,7 +196,7 @@ function onCustomFormToggle(e: Event) {
 <template>
   <div class="flex flex-col gap-3 divide-y divide-gray-100">
     <FormKit
-      v-if="annotations && avaliableAnnotationSettings.length > 0"
+      v-if="annotations && annotationSettings.length > 0"
       :id="specFormId"
       v-model="annotations"
       type="form"
@@ -218,20 +204,24 @@ function onCustomFormToggle(e: Event) {
       @submit-invalid="onSpecFormSubmitCheck"
       @submit="specFormInvalid = false"
     >
-      <template
-        v-for="(annotationSetting, index) in avaliableAnnotationSettings"
-      >
+      <template v-for="annotationSetting in annotationSettings">
         <FormKitSchema
           v-if="annotationSetting.spec?.formSchema"
-          :key="index"
-          :schema="annotationSetting.spec?.formSchema as (FormKitSchemaCondition| FormKitSchemaNode[])"
+          :key="annotationSetting.metadata.name"
+          :schema="
+            annotationSetting.spec?.formSchema as FormKitSchemaDefinition
+          "
+          :data="{
+            formData,
+          }"
         />
       </template>
     </FormKit>
 
+    <!-- @vue-ignore -->
     <details
       :open="showCustomForm"
-      class="flex cursor-pointer space-y-4 py-4 transition-all first:pt-0"
+      class="flex cursor-pointer flex-col space-y-4 py-4 transition-all first:pt-0"
       @toggle="onCustomFormToggle"
     >
       <summary class="group flex items-center justify-between">
@@ -260,14 +250,15 @@ function onCustomFormToggle(e: Event) {
         :id="customFormId"
         type="form"
         :preserve="true"
-        :form-class="`${avaliableAnnotationSettings.length ? 'py-4' : ''}`"
+        :form-class="`${annotationSettings.length ? 'py-4' : ''}`"
         @submit-invalid="onCustomFormSubmitCheck"
         @submit="customFormInvalid = false"
       >
         <FormKit
           v-model="customAnnotationsState"
-          type="repeater"
+          type="array"
           :label="$t('core.components.annotations_form.custom_fields.label')"
+          :item-labels="[{ type: 'text', label: '$value.key' }]"
         >
           <FormKit
             type="text"

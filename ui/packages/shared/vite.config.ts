@@ -1,46 +1,41 @@
-import { fileURLToPath, URL } from "url";
-
-import { defineConfig } from "vite";
-import Vue from "@vitejs/plugin-vue";
-import VueJsx from "@vitejs/plugin-vue-jsx";
-import path from "path";
-import Dts from "vite-plugin-dts";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite-plus";
 
 export default defineConfig({
-  plugins: [
-    Vue(),
-    VueJsx(),
-    Dts({
-      tsConfigFilePath: "./tsconfig.app.json",
-      entryRoot: "./src",
-      outputDir: "./dist",
-      insertTypesEntry: true,
-    }),
-  ],
-  resolve: {
+  test: {
+    // Vitest v4 compatibility: preserve mock call history.
+    // Remove after tests no longer rely on calls from setup or earlier tests.
+    // https://viteplus.dev/guide/vitest-v5#remove-unneeded-compatibility-settings
+    // https://vitest.dev/guide/migration/#clearmocks-is-enabled-by-default
+    clearMocks: false,
+  },
+  pack: {
+    entry: ["./src/index.ts"],
+    format: ["esm", "iife"],
+    deps: {
+      resolveDepSubpath: true,
+      neverBundle: ["vue", "vue-router", "pinia", "@halo-dev/api-client"],
+      alwaysBundle: ["mitt"],
+      onlyBundle: false,
+    },
+    outputOptions: {
+      globals: {
+        vue: "Vue",
+        "vue-router": "VueRouter",
+        pinia: "Pinia",
+        "@halo-dev/api-client": "HaloApiClient",
+      },
+    },
+    platform: "browser",
+    globalName: "HaloUiShared",
+    tsconfig: "./tsconfig.app.json",
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
-  },
-  build: {
-    outDir: path.resolve(__dirname, "dist"),
-    lib: {
-      entry: path.resolve(__dirname, "src/index.ts"),
-      name: "HaloConsoleShared",
-      formats: ["es", "iife"],
-      fileName: (format) => `halo-console-shared.${format}.js`,
+    minify: true,
+    exports: true,
+    dts: {
+      generator: "tsgo",
     },
-    rollupOptions: {
-      external: ["vue", "vue-router"],
-      output: {
-        globals: {
-          vue: "Vue",
-          "vue-router": "VueRouter",
-        },
-        exports: "named",
-        generatedCode: "es5",
-      },
-    },
-    sourcemap: true,
   },
 });

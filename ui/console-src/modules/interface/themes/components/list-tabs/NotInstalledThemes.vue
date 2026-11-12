@@ -1,9 +1,12 @@
 <script lang="ts" setup>
-import { VButton, VEmpty, VSpace, VLoading } from "@halo-dev/components";
-import ThemeListItem from "../ThemeListItem.vue";
-import type { Theme } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
+import type {
+  Theme,
+  ThemeV1alpha1ConsoleApiListThemesRequest,
+} from "@halo-dev/api-client";
+import { consoleApiClient, paginate } from "@halo-dev/api-client";
+import { VButton, VEmpty, VLoading } from "@halo-dev/components";
 import { useQuery } from "@tanstack/vue-query";
+import ThemeListItem from "../ThemeListItem.vue";
 
 const {
   data: themes,
@@ -13,12 +16,13 @@ const {
 } = useQuery<Theme[]>({
   queryKey: ["not-installed-themes"],
   queryFn: async () => {
-    const { data } = await apiClient.theme.listThemes({
-      page: 0,
-      size: 0,
-      uninstalled: true,
-    });
-    return data.items;
+    return await paginate<ThemeV1alpha1ConsoleApiListThemesRequest, Theme>(
+      (params) => consoleApiClient.theme.theme.listThemes(params),
+      {
+        uninstalled: true,
+        size: 1000,
+      }
+    );
   },
 });
 </script>
@@ -29,11 +33,9 @@ const {
     <Transition v-else-if="!themes?.length" appear name="fade">
       <VEmpty :title="$t('core.theme.list_modal.not_installed_empty.title')">
         <template #actions>
-          <VSpace>
-            <VButton :loading="isFetching" @click="refetch">
-              {{ $t("core.common.buttons.refresh") }}
-            </VButton>
-          </VSpace>
+          <VButton :loading="isFetching" @click="refetch">
+            {{ $t("core.common.buttons.refresh") }}
+          </VButton>
         </template>
       </VEmpty>
     </Transition>

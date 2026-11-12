@@ -6,14 +6,14 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
+import org.jspecify.annotations.Nullable;
+import org.pf4j.PluginManager;
 import org.pf4j.PluginState;
 import org.springframework.core.io.DefaultResourceLoader;
-import org.springframework.lang.Nullable;
 import org.thymeleaf.IEngineConfiguration;
 import org.thymeleaf.spring6.templateresource.SpringResourceTemplateResource;
 import org.thymeleaf.templateresolver.AbstractConfigurableTemplateResolver;
 import org.thymeleaf.templateresource.ITemplateResource;
-import run.halo.app.plugin.HaloPluginManager;
 
 /**
  * Plugin classloader template resolver to resolve template by plugin classloader.
@@ -23,26 +23,28 @@ import run.halo.app.plugin.HaloPluginManager;
  */
 public class PluginClassloaderTemplateResolver extends AbstractConfigurableTemplateResolver {
 
-    private final HaloPluginManager haloPluginManager;
-    static final Pattern PLUGIN_TEMPLATE_PATTERN =
-        Pattern.compile("plugin:([A-Za-z0-9\\-.]+):(.+)");
+    private final PluginManager haloPluginManager;
+    static final Pattern PLUGIN_TEMPLATE_PATTERN = Pattern.compile("plugin:([A-Za-z0-9\\-.]+):(.+)");
 
     /**
      * Create a new plugin classloader template resolver, not cacheable.
      *
-     * @param haloPluginManager plugin manager must not be null
+     * @param pluginManager plugin manager must not be null
      */
-    public PluginClassloaderTemplateResolver(HaloPluginManager haloPluginManager) {
+    public PluginClassloaderTemplateResolver(PluginManager pluginManager) {
         super();
-        this.haloPluginManager = haloPluginManager;
+        this.haloPluginManager = pluginManager;
         setCacheable(false);
     }
 
     @Override
     protected ITemplateResource computeTemplateResource(
-        final IEngineConfiguration configuration, final String ownerTemplate, final String template,
-        final String resourceName, final String characterEncoding,
-        final Map<String, Object> templateResolutionAttributes) {
+            final IEngineConfiguration configuration,
+            final String ownerTemplate,
+            final String template,
+            final String resourceName,
+            final String characterEncoding,
+            final Map<String, Object> templateResolutionAttributes) {
         var matchResult = matchPluginTemplate(ownerTemplate, template);
         if (!matchResult.matches()) {
             return null;
@@ -56,12 +58,17 @@ public class PluginClassloaderTemplateResolver extends AbstractConfigurableTempl
         var templateName = matchResult.templateName();
         var ownerTemplateName = matchResult.ownerTemplateName();
 
-        String handledResourceName = computeResourceName(configuration, ownerTemplateName,
-            templateName, getPrefix(), getSuffix(), getForceSuffix(), getTemplateAliases(),
-            templateResolutionAttributes);
+        String handledResourceName = computeResourceName(
+                configuration,
+                ownerTemplateName,
+                templateName,
+                getPrefix(),
+                getSuffix(),
+                getForceSuffix(),
+                getTemplateAliases(),
+                templateResolutionAttributes);
 
-        var resource = new DefaultResourceLoader(classloader)
-            .getResource(handledResourceName);
+        var resource = new DefaultResourceLoader(classloader).getResource(handledResourceName);
         return new SpringResourceTemplateResource(resource, characterEncoding);
     }
 
@@ -87,9 +94,7 @@ public class PluginClassloaderTemplateResolver extends AbstractConfigurableTempl
         return new MatchResult(pluginName, ownerTemplateName, templateName, matches);
     }
 
-    record MatchResult(String pluginName, String ownerTemplateName, String templateName,
-                       boolean matches) {
-    }
+    record MatchResult(String pluginName, String ownerTemplateName, String templateName, boolean matches) {}
 
     @Nullable
     private ClassLoader getClassloaderByPlugin(String pluginName) {

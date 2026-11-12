@@ -1,40 +1,58 @@
+import type { FormKitNode, FormKitTypeDefinition } from "@formkit/core";
+import type { FormKitInputs } from "@formkit/inputs";
+import {
+  coreApiClient,
+  paginate,
+  type Role,
+  type RoleV1alpha1ApiListRoleRequest,
+} from "@halo-dev/api-client";
 import { rbacAnnotations } from "@/constants/annotations";
 import { roleLabels } from "@/constants/labels";
-import { apiClient } from "@/utils/api-client";
-import type { FormKitNode, FormKitTypeDefinition } from "@formkit/core";
-import { select, selects, defaultIcon } from "@formkit/inputs";
-import { i18n } from "@/locales";
+import { select } from "./select";
 
 function optionsHandler(node: FormKitNode) {
   node.on("created", async () => {
-    const { data } = await apiClient.extension.role.listv1alpha1Role({
-      page: 0,
-      size: 0,
-      labelSelector: [`!${roleLabels.TEMPLATE}`],
-    });
-
-    node.props.options = [
+    const roles = await paginate<RoleV1alpha1ApiListRoleRequest, Role>(
+      (params) => coreApiClient.role.listRole(params),
       {
-        label: i18n.global.t(
-          "core.user.grant_permission_modal.fields.role.placeholder"
-        ),
-        value: "",
-      },
-      ...data.items.map((role) => {
-        return {
-          label:
-            role.metadata?.annotations?.[rbacAnnotations.DISPLAY_NAME] ||
-            role.metadata.name,
-          value: role.metadata?.name,
-        };
-      }),
+        size: 1000,
+        labelSelector: [`!${roleLabels.TEMPLATE}`],
+      }
+    );
+
+    const options = [
+      ...roles
+        .filter(
+          (role) => !node.props.excludedNames?.includes(role.metadata.name)
+        )
+        .map((role) => {
+          return {
+            label:
+              role.metadata?.annotations?.[rbacAnnotations.DISPLAY_NAME] ||
+              role.metadata.name,
+            value: role.metadata?.name,
+          };
+        }),
     ];
+    if (node.context) {
+      node.context.attrs.options = options;
+    }
   });
 }
 
 export const roleSelect: FormKitTypeDefinition = {
   ...select,
-  props: ["placeholder"],
   forceTypeProp: "select",
-  features: [optionsHandler, selects, defaultIcon("select", "select")],
+  props: [...(select.props as string[]), "excludedNames"],
+  features: [optionsHandler],
 };
+
+declare module "@formkit/inputs" {
+  export interface FormKitInputProps<Props extends FormKitInputs<Props>> {
+    roleSelect: {
+      type: "roleSelect";
+      value?: string;
+      excludedNames?: string[];
+    };
+  }
+}

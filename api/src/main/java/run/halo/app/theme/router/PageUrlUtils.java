@@ -1,5 +1,6 @@
 package run.halo.app.theme.router;
 
+import java.util.Objects;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -27,8 +28,7 @@ public class PageUrlUtils {
     public static boolean isPageUrl(String path) {
         String[] split = StringUtils.split(path, "/");
         if (split.length > 1) {
-            return PAGE_PART.equals(split[split.length - 2])
-                && NumberUtils.isDigits(split[split.length - 1]);
+            return PAGE_PART.equals(split[split.length - 2]) && NumberUtils.isDigits(split[split.length - 1]);
         }
         return false;
     }
@@ -83,7 +83,7 @@ public class PageUrlUtils {
                 return PathUtils.combinePath(segments);
             }
         }
-        return StringUtils.defaultString(path, "/");
+        return Objects.toString(path, "/");
     }
 
     private static String appendPagePart(String path, long page) {

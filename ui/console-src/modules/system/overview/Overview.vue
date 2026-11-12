@@ -1,70 +1,60 @@
 <script lang="ts" setup>
+import { useActivatedTheme } from "@console/composables/use-activated-theme";
+import type {
+  Plugin,
+  PluginV1alpha1ConsoleApiListPluginsRequest,
+} from "@halo-dev/api-client";
+import { consoleApiClient, paginate } from "@halo-dev/api-client";
 import {
-  IconTerminalBoxLine,
   IconClipboardLine,
-  VAlert,
-  VPageHeader,
-  VCard,
-  VButton,
+  IconTerminalBoxLine,
   Toast,
+  VButton,
+  VCard,
   VDescription,
   VDescriptionItem,
-  VTag,
   VLoading,
+  VPageHeader,
+  VTag,
 } from "@halo-dev/components";
-import { computed } from "vue";
-import type { Info, GlobalInfo, Startup } from "@/types";
-import axios from "axios";
-import { formatDatetime } from "@/utils/date";
-import { useClipboard } from "@vueuse/core";
-import { useI18n } from "vue-i18n";
-import { useThemeStore } from "@console/stores/theme";
-import type { Plugin } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
+import type { Info, Startup } from "@halo-dev/ui-shared";
+import { stores, utils } from "@halo-dev/ui-shared";
 import { useQuery } from "@tanstack/vue-query";
-import { usePermission } from "@/utils/permission";
+import { useClipboard } from "@vueuse/core";
+import axios from "axios";
+import { storeToRefs } from "pinia";
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import H2WarningAlert from "@/components/alerts/H2WarningAlert.vue";
+import ExternalUrlItem from "./components/ExternalUrlItem.vue";
 
 const { t } = useI18n();
-const themeStore = useThemeStore();
-const { currentUserHasPermission } = usePermission();
+const {
+  data: activatedTheme,
+  isInitialLoading: themeLoading,
+  isError: themeError,
+  refetch: refetchTheme,
+} = useActivatedTheme();
 
 const { data: info } = useQuery<Info>({
   queryKey: ["system-info"],
   queryFn: async () => {
-    const { data } = await axios.get<Info>(
-      `${import.meta.env.VITE_API_URL}/actuator/info`,
-      {
-        withCredentials: true,
-      }
-    );
+    const { data } = await axios.get<Info>(`/actuator/info`, {
+      withCredentials: true,
+    });
     return data;
   },
   retry: 0,
 });
 
-const { data: globalInfo } = useQuery<GlobalInfo>({
-  queryKey: ["system-global-info"],
-  queryFn: async () => {
-    const { data } = await axios.get<GlobalInfo>(
-      `${import.meta.env.VITE_API_URL}/actuator/globalinfo`,
-      {
-        withCredentials: true,
-      }
-    );
-    return data;
-  },
-  retry: 0,
-});
+const { globalInfo } = storeToRefs(stores.globalInfo());
 
 const { data: startup } = useQuery<Startup>({
   queryKey: ["system-startup-info"],
   queryFn: async () => {
-    const { data } = await axios.get<Startup>(
-      `${import.meta.env.VITE_API_URL}/actuator/startup`,
-      {
-        withCredentials: true,
-      }
-    );
+    const { data } = await axios.get<Startup>(`/actuator/startup`, {
+      withCredentials: true,
+    });
     return data;
   },
   retry: 0,
@@ -73,29 +63,15 @@ const { data: startup } = useQuery<Startup>({
 const { data: plugins, isLoading: isPluginsLoading } = useQuery<Plugin[]>({
   queryKey: ["enabled-plugins"],
   queryFn: async () => {
-    const { data } = await apiClient.plugin.listPlugins({
-      page: 0,
-      size: 0,
-      enabled: true,
-    });
-
-    return data.items;
+    return await paginate<PluginV1alpha1ConsoleApiListPluginsRequest, Plugin>(
+      (params) => consoleApiClient.plugin.plugin.listPlugins(params),
+      {
+        size: 1000,
+        enabled: true,
+      }
+    );
   },
-  enabled: computed(() => currentUserHasPermission(["system:plugins:view"])),
-});
-
-const isExternalUrlValid = computed(() => {
-  if (!globalInfo.value?.useAbsolutePermalink) {
-    return true;
-  }
-
-  if (!globalInfo.value?.externalUrl) {
-    return true;
-  }
-
-  const url = new URL(globalInfo.value.externalUrl);
-  const { host: currentHost, protocol: currentProtocol } = window.location;
-  return url.host === currentHost && url.protocol === currentProtocol;
+  enabled: computed(() => utils.permission.has(["system:plugins:view"])),
 });
 
 // copy system information to clipboard
@@ -121,7 +97,7 @@ const handleCopy = () => {
     },
     {
       label: t("core.overview.fields.start_time"),
-      value: formatDatetime(startup.value?.timeline.startTime) || "",
+      value: utils.date.format(startup.value?.timeline.startTime) || "",
     },
     {
       label: t("core.overview.fields.version"),
@@ -129,7 +105,7 @@ const handleCopy = () => {
     },
     {
       label: t("core.overview.fields.build_time"),
-      value: formatDatetime(info.value?.build?.time) || "",
+      value: utils.date.format(info.value?.build?.time) || "",
     },
     {
       label: "Git Commit",
@@ -159,15 +135,19 @@ const handleCopy = () => {
     },
     {
       label: t("core.overview.fields.activated_theme"),
-      value: themeStore.activatedTheme?.spec.displayName || "",
+      value: [
+        activatedTheme.value?.spec.displayName,
+        activatedTheme.value?.spec.version,
+      ]
+        .filter(Boolean)
+        .join(" "),
       href:
-        themeStore.activatedTheme?.spec.repo ||
-        themeStore.activatedTheme?.spec.homepage,
+        activatedTheme.value?.spec.repo || activatedTheme.value?.spec.homepage,
     },
     {
       label: t("core.overview.fields.enabled_plugins"),
       children: plugins.value?.map((plugin) => ({
-        value: plugin.spec.displayName,
+        value: `${plugin.spec.displayName} ${plugin.spec.version}`,
         href: plugin.spec.repo || plugin.spec.homepage,
       })) as CopyItem[],
     },
@@ -201,13 +181,13 @@ const handleCopy = () => {
 
 const handleDownloadLogfile = () => {
   axios
-    .get(`${import.meta.env.VITE_API_URL}/actuator/logfile`)
+    .get(`/actuator/logfile`)
     .then((response) => {
       const blob = new Blob([response.data]);
       const downloadElement = document.createElement("a");
       const href = window.URL.createObjectURL(blob);
       downloadElement.href = href;
-      downloadElement.download = `halo-log-${formatDatetime(new Date())}.log`;
+      downloadElement.download = `halo-log-${utils.date.format(new Date())}.log`;
       document.body.appendChild(downloadElement);
       downloadElement.click();
       document.body.removeChild(downloadElement);
@@ -225,12 +205,12 @@ const handleDownloadLogfile = () => {
 <template>
   <VPageHeader :title="$t('core.overview.title')">
     <template #icon>
-      <IconTerminalBoxLine class="mr-2 self-center" />
+      <IconTerminalBoxLine />
     </template>
     <template #actions>
       <VButton size="sm" @click="handleCopy">
         <template #icon>
-          <IconClipboardLine class="h-full w-full" />
+          <IconClipboardLine />
         </template>
         {{ $t("core.common.buttons.copy") }}
       </VButton>
@@ -251,43 +231,32 @@ const handleDownloadLogfile = () => {
         </div>
         <div class="border-t border-gray-200">
           <VDescription>
-            <VDescriptionItem :label="$t('core.overview.fields.external_url')">
-              <span v-if="globalInfo?.externalUrl">
-                {{ globalInfo?.externalUrl }}
-              </span>
-              <span v-else>
-                {{ $t("core.overview.fields_values.external_url.not_setup") }}
-              </span>
-              <VAlert
-                v-if="!isExternalUrlValid"
-                class="mt-3"
-                type="warning"
-                :title="$t('core.common.text.warning')"
-                :closable="false"
-              >
-                <template #description>
-                  {{ $t("core.overview.alert.external_url_invalid") }}
-                </template>
-              </VAlert>
-            </VDescriptionItem>
+            <ExternalUrlItem />
             <VDescriptionItem
               v-if="startup?.timeline.startTime"
               :label="$t('core.overview.fields.start_time')"
-              :content="formatDatetime(startup?.timeline.startTime)"
+              :content="utils.date.format(startup?.timeline.startTime)"
             />
             <VDescriptionItem
-              v-if="themeStore.activatedTheme"
+              v-if="activatedTheme || themeLoading || themeError"
               :label="$t('core.overview.fields.activated_theme')"
             >
-              <VTag @click="$router.push({ name: 'ThemeDetail' })">
-                <template v-if="themeStore.activatedTheme.spec.logo" #leftIcon>
+              <VLoading v-if="themeLoading" />
+              <VButton v-else-if="themeError" @click="refetchTheme()">{{
+                $t("core.common.buttons.retry")
+              }}</VButton>
+              <VTag
+                v-else-if="activatedTheme"
+                @click="$router.push({ name: 'ThemeDetail' })"
+              >
+                <template v-if="activatedTheme.spec.logo" #leftIcon>
                   <img
                     class="h-3.5 w-3.5 rounded-sm"
-                    :src="themeStore.activatedTheme.spec.logo"
-                    :alt="themeStore.activatedTheme.spec.displayName"
+                    :src="activatedTheme.spec.logo"
+                    :alt="activatedTheme.spec.displayName"
                   />
                 </template>
-                {{ themeStore.activatedTheme.spec.displayName }}
+                {{ activatedTheme.spec.displayName }}
               </VTag>
             </VDescriptionItem>
             <VDescriptionItem
@@ -352,7 +321,7 @@ const handleDownloadLogfile = () => {
             <VDescriptionItem
               v-if="info.build"
               :label="$t('core.overview.fields.build_time')"
-              :content="formatDatetime(info.build.time)"
+              :content="utils.date.format(info.build.time)"
             />
             <VDescriptionItem v-if="info.git" label="Git Commit">
               <a
@@ -373,17 +342,7 @@ const handleDownloadLogfile = () => {
               <span>
                 {{ [info.database.name, info.database.version].join(" / ") }}
               </span>
-              <VAlert
-                v-if="info.database.name.startsWith('H2')"
-                class="mt-3"
-                type="warning"
-                :title="$t('core.common.text.warning')"
-                :closable="false"
-              >
-                <template #description>
-                  {{ $t("core.overview.alert.h2_warning") }}
-                </template>
-              </VAlert>
+              <H2WarningAlert class="mt-3" />
             </VDescriptionItem>
             <VDescriptionItem :label="$t('core.overview.fields.os')">
               {{ info.os.name }} {{ info.os.version }} / {{ info.os.arch }}

@@ -1,88 +1,72 @@
-import "@/setup/setupStyles";
-import { createApp, type DirectiveBinding } from "vue";
-import App from "./App.vue";
-import { setupVueQuery } from "@/setup/setupVueQuery";
-import { setupComponents } from "@/setup/setupComponents";
-import { getBrowserLanguage, i18n, setupI18n } from "@/locales";
-import { createPinia } from "pinia";
-import { setupCoreModules, setupPluginModules } from "@uc/setup/setupModules";
+import { stores } from "@halo-dev/ui-shared";
+import modules from "@uc/modules";
 import router from "@uc/router";
-import { useUserStore } from "@/stores/user";
-import { apiClient } from "@/utils/api-client";
-import { useRoleStore } from "@/stores/role";
-import { hasPermission } from "@/utils/permission";
-import { useGlobalInfoStore } from "@/stores/global-info";
+import { createPinia } from "pinia";
+import "@/setup/setupStyles";
+import { createApp } from "vue";
+import { builtinFormKitInputs } from "@/formkit/inputs";
+import { setLanguage, setupI18n } from "@/locales";
+import { setupApiClient } from "@/setup/setupApiClient";
+import "@/setup/setupFormKitRuntime";
+import {
+  setupComponents,
+  type SetupComponentsOptions,
+} from "@/setup/setupComponents";
+import { setupCoreModules, setupUiPluginRuntime } from "@/setup/setupModules";
+import "core-js/es/object/has-own";
+import { setupUserPermissions } from "@/setup/setupUserPermissions";
+import { setupVueQuery } from "@/setup/setupVueQuery";
+import App from "./App.vue";
 
 const app = createApp(App);
+let componentsReady = false;
 
-setupComponents(app);
 setupI18n(app);
 setupVueQuery(app);
+setupApiClient();
 
 app.use(createPinia());
 
-async function loadUserPermissions() {
-  const { data: currentPermissions } = await apiClient.user.getPermissions({
-    name: "-",
-  });
-  const roleStore = useRoleStore();
-  roleStore.$patch({
-    permissions: currentPermissions,
-  });
-  app.directive(
-    "permission",
-    (el: HTMLElement, binding: DirectiveBinding<string[]>) => {
-      const uiPermissions = Array.from<string>(
-        currentPermissions.uiPermissions
-      );
-      const { value } = binding;
-      const { any, enable } = binding.modifiers;
-
-      if (hasPermission(uiPermissions, value, any)) {
-        return;
-      }
-
-      if (enable) {
-        //TODO
-        return;
-      }
-      el?.remove?.();
-    }
-  );
+function setupAppComponents(options?: SetupComponentsOptions) {
+  if (componentsReady) {
+    return;
+  }
+  setupComponents(app, options);
+  componentsReady = true;
 }
 
-(async function () {
-  await initApp();
-})();
+await initApp();
 
 async function initApp() {
   try {
-    setupCoreModules(app);
+    setupCoreModules({ app, router, platform: "uc", modules });
 
-    const userStore = useUserStore();
-    await userStore.fetchCurrentUser();
+    await setLanguage();
 
-    // set locale
-    i18n.global.locale.value =
-      localStorage.getItem("locale") || getBrowserLanguage();
+    const currentUserStore = stores.currentUser();
+    await currentUserStore.fetchCurrentUser();
 
-    const globalInfoStore = useGlobalInfoStore();
+    const globalInfoStore = stores.globalInfo();
     await globalInfoStore.fetchGlobalInfo();
 
-    if (userStore.isAnonymous) {
+    if (currentUserStore.isAnonymous) {
+      setupAppComponents();
       return;
     }
 
-    await loadUserPermissions();
+    await setupUserPermissions(app);
 
-    try {
-      await setupPluginModules(app);
-    } catch (e) {
-      console.error("Failed to load plugins", e);
-    }
+    await setupUiPluginRuntime({
+      app,
+      router,
+      platform: "uc",
+      setupComponents: setupAppComponents,
+      registeredFormKitInputs: builtinFormKitInputs,
+    });
   } catch (error) {
     console.error("Failed to init app", error);
   } finally {
+    setupAppComponents();
     app.use(router);
     app.mount("#app");
   }

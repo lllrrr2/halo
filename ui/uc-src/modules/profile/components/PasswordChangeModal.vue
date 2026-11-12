@@ -1,94 +1,76 @@
 <script lang="ts" setup>
+import { ucApiClient } from "@halo-dev/api-client";
 import { VButton, VModal, VSpace } from "@halo-dev/components";
+import { cloneDeep } from "es-toolkit";
+import { onMounted, ref } from "vue";
 import SubmitButton from "@/components/button/SubmitButton.vue";
-import { ref, watch } from "vue";
-import type { User } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
-import { cloneDeep } from "lodash-es";
-import { reset } from "@formkit/core";
+import { PASSWORD_REGEX } from "@/constants/regex";
 import { setFocus } from "@/formkit/utils/focus";
 
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-    user?: User;
-  }>(),
-  {
-    visible: false,
-    user: undefined,
-  }
-);
+const props = withDefaults(defineProps<{ hasPassword?: boolean }>(), {
+  hasPassword: true,
+});
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
 interface PasswordChangeFormState {
-  oldPassword: string;
+  oldPassword?: string;
   password: string;
   password_confirm?: string;
 }
 
-const initialFormState: PasswordChangeFormState = {
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+
+const formState = ref<PasswordChangeFormState>({
   oldPassword: "",
   password: "",
   password_confirm: "",
-};
+});
+const isSubmitting = ref(false);
 
-const formState = ref<PasswordChangeFormState>(cloneDeep(initialFormState));
-const saving = ref(false);
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      setFocus("passwordInput");
-    } else {
-      handleResetForm();
-    }
-  }
-);
-
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
-
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("password-form");
-};
+onMounted(() => {
+  setFocus(props.hasPassword ? "passwordInput" : "newPasswordInput");
+});
 
 const handleChangePassword = async () => {
   try {
-    saving.value = true;
+    isSubmitting.value = true;
 
-    const changeOwnPasswordRequest = cloneDeep(formState.value);
-    delete changeOwnPasswordRequest.password_confirm;
+    const updatePasswordRequest = cloneDeep(formState.value);
+    delete updatePasswordRequest.password_confirm;
+    if (!props.hasPassword) {
+      delete updatePasswordRequest.oldPassword;
+    }
 
-    await apiClient.user.changeOwnPassword({
-      changeOwnPasswordRequest,
+    await ucApiClient.user.currentUser.changeMyPassword({
+      changeMyPasswordRequest: updatePasswordRequest,
     });
 
     window.location.reload();
   } catch (e) {
     console.error(e);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 </script>
 
 <template>
   <VModal
-    :visible="visible"
+    ref="modal"
     :width="500"
-    :title="$t('core.uc_profile.change_password_modal.title')"
-    @update:visible="onVisibleChange"
+    :title="
+      $t(
+        hasPassword
+          ? 'core.uc_profile.change_password_modal.title'
+          : 'core.uc_profile.change_password_modal.title_set'
+      )
+    "
+    @close="emit('close')"
   >
+    <!-- @vue-ignore -->
     <FormKit
       id="password-form"
       v-model="formState"
@@ -99,6 +81,7 @@ const handleChangePassword = async () => {
       @submit="handleChangePassword"
     >
       <FormKit
+        v-if="hasPassword"
         id="passwordInput"
         :label="
           $t('core.uc_profile.change_password_modal.fields.old_password.label')
@@ -108,14 +91,19 @@ const handleChangePassword = async () => {
         validation="required:trim"
       ></FormKit>
       <FormKit
+        id="newPasswordInput"
         :label="
           $t('core.uc_profile.change_password_modal.fields.new_password.label')
         "
         name="password"
         type="password"
-        validation="required:trim|length:5,100|matches:/^\S.*\S$/"
+        :validation="[
+          ['required'],
+          ['length', 5, 257],
+          ['matches', PASSWORD_REGEX],
+        ]"
         :validation-messages="{
-          matches: $t('core.formkit.validation.trim'),
+          matches: $t('core.formkit.validation.password'),
         }"
       ></FormKit>
       <FormKit
@@ -126,23 +114,19 @@ const handleChangePassword = async () => {
         "
         name="password_confirm"
         type="password"
-        validation="confirm|required:trim|length:5,100|matches:/^\S.*\S$/"
-        :validation-messages="{
-          matches: $t('core.formkit.validation.trim'),
-        }"
+        validation="confirm|required"
       ></FormKit>
     </FormKit>
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('password-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

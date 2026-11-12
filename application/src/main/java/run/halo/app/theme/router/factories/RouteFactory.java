@@ -8,7 +8,7 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.theme.router.ModelConst;
 
@@ -20,10 +20,8 @@ public interface RouteFactory {
     RouterFunction<ServerResponse> create(String pattern);
 
     default Mono<Integer> configuredPageSize(
-        SystemConfigurableEnvironmentFetcher environmentFetcher,
-        Function<SystemSetting.Post, Integer> mapper) {
-        return environmentFetcher.fetchPost()
-            .map(p -> defaultIfNull(mapper.apply(p), ModelConst.DEFAULT_PAGE_SIZE));
+            SystemConfigFetcher environmentFetcher, Function<SystemSetting.Post, Integer> mapper) {
+        return environmentFetcher.fetchPost().map(p -> defaultIfNull(mapper.apply(p), ModelConst.DEFAULT_PAGE_SIZE));
     }
 
     default int pageNumInPathVariable(ServerRequest request) {

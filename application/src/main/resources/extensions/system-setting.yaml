@@ -17,13 +17,28 @@ spec:
         - $formkit: attachment
           label: Logo
           name: logo
+          width: "4rem"
           accepts:
-            - 'image/*'
+            - "image/*"
         - $formkit: attachment
           label: Favicon
           name: favicon
+          width: "4rem"
           accepts:
-            - 'image/*'
+            - "image/*"
+        - $formkit: select
+          label: "首选语言"
+          name: language
+          value: "zh-CN"
+          options:
+            - label: "English"
+              value: "en"
+            - label: "Español"
+              value: "es"
+            - label: "简体中文"
+              value: "zh-CN"
+            - label: "繁体中文"
+              value: "zh-TW"
     - group: post
       label: 文章设置
       formSchema:
@@ -55,30 +70,27 @@ spec:
           min: 1
           max: 100
           validation: required
+        - $formkit: number
+          label: "作者页文章显示条数"
+          name: authorPageSize
+          value: 10
+          min: 1
+          max: 100
+          validation: required
         - $formkit: select
           label: "别名生成策略"
           name: slugGenerationStrategy
-          value: 'generateByTitle'
+          value: "generateByTitle"
           options:
-            - label: '根据标题'
-              value: 'generateByTitle'
-            - label: '时间戳'
-              value: 'timestamp'
-            - label: 'Short UUID'
-              value: 'shortUUID'
-            - label: 'UUID'
-              value: 'UUID'
+            - label: "根据标题"
+              value: "generateByTitle"
+            - label: "时间戳"
+              value: "timestamp"
+            - label: "Short UUID"
+              value: "shortUUID"
+            - label: "UUID"
+              value: "UUID"
           help: 此选项仅在创建文章时生效，修改此选项不会影响已有文章
-        - $formkit: attachmentPolicySelect
-          name: attachmentPolicyName
-          label: "附件存储策略"
-          value: "default-policy"
-          help: 用于指定在文章编辑器中上传的默认附件存储策略
-        - $formkit: attachmentGroupSelect
-          name: attachmentGroupName
-          label: "附件存储组"
-          value: ""
-          help: 用于指定在文章编辑器中上传的默认附件存储分组
     - group: seo
       label: SEO 设置
       formSchema:
@@ -86,12 +98,17 @@ spec:
           name: blockSpiders
           label: "屏蔽搜索引擎"
           value: false
+          help: '为所有页面添加 <meta name="robots" content="noindex" /> 标签，阻止搜索引擎索引，但不是所有搜索引擎都会遵守'
         - $formkit: textarea
           name: keywords
           label: "站点关键词"
+          help: "目前主流搜索引擎已经不再使用此字段，所以通常不建议设置，此选项可能在未来版本中被移除"
+          auto-height: true
         - $formkit: textarea
           name: description
           label: "站点描述"
+          help: "仅对首页生效，其他页面将根据页面类型自动生成描述"
+          auto-height: true
     - group: user
       label: 用户设置
       formSchema:
@@ -104,20 +121,67 @@ spec:
         - $formkit: checkbox
           name: mustVerifyEmailOnRegistration
           label: "注册需验证邮箱"
-          if: "$get(allowRegistration).value === true"
-          help: "需要确保已经正确配置邮件通知器"
+          help: "开启后，用户需验证邮箱后才能访问受保护资源，具有超级管理员权限的请求除外。此设置同样影响已有用户和个人令牌（PAT），关闭注册后仍然生效。请确保已正确配置邮件通知器"
           value: false
+        - $formkit: textarea
+          name: protectedUsernames
+          label: "保留用户名与名称"
+          if: "$get(allowRegistration).value === true"
+          help: 保留用户名与名称，限制用户注册或编辑资料时使用，多个请用英文逗号,分隔，留空则不限制
+          value: "admin,administrator,root,system,superuser,guest,test,demo,user,backup,ftp,www,manager,support,service,api,超级管理员,管理员"
         - $formkit: roleSelect
           name: defaultRole
+          excludedNames:
+            - super-role
           label: "默认角色"
-          validation: 'required'
+          validation: "required"
           if: "$get(allowRegistration).value === true"
           help: 用户注册之后默认为用户分配的角色
-        - $formkit: attachmentPolicySelect
-          name: avatarPolicy
-          label: "头像存储位置"
-          value: "default-policy"
-          help: 指定用户上传头像的存储策略
+        - $formkit: singlePageSelect
+          name: requiredAgreementPages
+          label: "注册时所需协议"
+          multiple: true
+          if: "$get(allowRegistration).value === true"
+          help: 选择注册时需要用户同意的协议页面
+    - group: attachment
+      label: 附件配置
+      formSchema:
+        - $formkit: group
+          name: console
+          label: 管理端附件配置
+          help: 为管理端直接上传附件的地方设置默认的存储策略和分组
+          children:
+            - $formkit: attachmentPolicySelect
+              name: policyName
+              label: "存储策略"
+              auto-select: false
+            - $formkit: attachmentGroupSelect
+              name: groupName
+              label: "存储组"
+              auto-select: false
+              clearable: true
+        - $formkit: group
+          name: uc
+          label: 个人中心附件配置
+          help: 为个人中心直接上传附件的地方设置默认的存储策略和分组，处于安全考虑，建议为所选存储策略限制文件类型和大小
+          children:
+            - $formkit: attachmentPolicySelect
+              name: policyName
+              label: "存储策略"
+              auto-select: false
+            - $formkit: attachmentGroupSelect
+              name: groupName
+              label: "存储组"
+              auto-select: false
+              clearable: true
+        - $formkit: group
+          name: avatar
+          label: 头像附件配置
+          help: 为用户头像设置存储策略，处于安全考虑，建议为所选存储策略限制文件类型和大小
+          children:
+            - $formkit: attachmentPolicySelect
+              name: policyName
+              label: "存储策略"
     - group: comment
       label: 评论设置
       formSchema:
@@ -137,6 +201,11 @@ spec:
     - group: routeRules
       label: 主题路由设置
       formSchema:
+        - $formkit: checkbox
+          label: "关闭主题预览"
+          value: false
+          name: disableThemePreview
+          help: "关闭后，未包含主题管理权限的用户将无法通过参数预览未激活的主题"
         - $formkit: text
           label: "分类页路由前缀"
           value: "categories"
@@ -154,22 +223,24 @@ spec:
           validation: required | alphanumeric
         - $formkit: select
           label: 文章详情页访问规则
-          value: '/archives/{slug}'
+          value: "/archives/{slug}"
           options:
-            - label: '/archives/{slug}'
-              value: '/archives/{slug}'
-            - label: '/archives/{name}'
-              value: '/archives/{name}'
-            - label: '/?p={name}'
-              value: '/?p={name}'
-            - label: '/?p={slug}'
-              value: '/?p={slug}'
-            - label: '/{year}/{slug}'
+            - label: "/archives/{slug}"
+              value: "/archives/{slug}"
+            - label: "/archives/{name}"
+              value: "/archives/{name}"
+            - label: "/?p={name}"
+              value: "/?p={name}"
+            - label: "/?p={slug}"
+              value: "/?p={slug}"
+            - label: "/{year}/{slug}"
               value: '/{year:\d{4}}/{slug}'
-            - label: '/{year}/{month}/{slug}'
+            - label: "/{year}/{month}/{slug}"
               value: '/{year:\d{4}}/{month:\d{2}}/{slug}'
-            - label: '/{year}/{month}/{day}/{slug}'
+            - label: "/{year}/{month}/{day}/{slug}"
               value: '/{year:\d{4}}/{month:\d{2}}/{day:\d{2}}/{slug}'
+            - label: "/categories/{categorySlug}/{slug}"
+              value: "/categories/{categorySlug}/{slug}"
           name: post
           validation: required
     - group: codeInjection

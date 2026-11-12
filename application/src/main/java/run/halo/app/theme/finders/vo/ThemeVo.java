@@ -1,6 +1,9 @@
 package run.halo.app.theme.finders.vo;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
+
 import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.ToString;
 import lombok.Value;
@@ -19,6 +22,7 @@ import run.halo.app.extension.MetadataOperator;
 @ToString
 public class ThemeVo implements ExtensionVoOperator {
 
+    @Schema(requiredMode = REQUIRED)
     MetadataOperator metadata;
 
     Theme.ThemeSpec spec;
@@ -34,9 +38,9 @@ public class ThemeVo implements ExtensionVoOperator {
      */
     public static ThemeVo from(Theme theme) {
         return ThemeVo.builder()
-            .metadata(theme.getMetadata())
-            .spec(theme.getSpec())
-            .config(null)
-            .build();
+                .metadata(theme.getMetadata())
+                .spec(theme.getSpec())
+                .config(null)
+                .build();
     }
 }

@@ -1,25 +1,36 @@
-export * from "./vue-3";
 export * from "./core";
+export { Decoration as TiptapDecoration } from "./core";
+export { Editor, MarkView, type MarkType, type NodeType } from "./core";
 export * from "./pm";
+export { Decoration } from "./pm";
 export {
-  Editor,
-  type Command,
-  InputRule,
-  Mark,
-  type NodeRange,
-  Node,
-  NodeView,
-  textblockTypeInputRule,
-  wrappingInputRule,
-} from "./vue-3";
-export { Editor as CoreEditor } from "./core";
-export {
-  type Command as PMCommand,
+  Fragment,
   InputRule as PMInputRule,
   Mark as PMMark,
-  type NodeRange as PMNodeRange,
   Node as PMNode,
-  type NodeView as PMNodeView,
+  liftListItem,
   textblockTypeInputRule as pmTextblockTypeInputRule,
   wrappingInputRule as pmWrappingInputRule,
+  sinkListItem,
+  splitListItem,
+  undoInputRule,
+  wrapInList,
+  type Command as PMCommand,
+  type MarkType as PMMarkType,
+  type MarkView as PMMarkView,
+  type NodeRange as PMNodeRange,
+  type NodeType as PMNodeType,
+  type NodeView as PMNodeView,
 } from "./pm";
+export * from "./vue-3";
+export {
+  InputRule,
+  Mark,
+  Node,
+  NodeView,
+  Editor as VueEditor,
+  textblockTypeInputRule,
+  wrappingInputRule,
+  type Command,
+  type NodeRange,
+} from "./vue-3";

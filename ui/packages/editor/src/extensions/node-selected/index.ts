@@ -1,59 +1,56 @@
-import { Extension } from "@/tiptap/vue-3";
+import { Decoration, Extension } from "@/tiptap/core";
 
-import { Plugin, PluginKey, Decoration, DecorationSet } from "@/tiptap/pm";
-
-export interface NodeSelectedOptions {
+export interface ExtensionNodeSelectedOptions {
   className: string;
 }
 
-const NodeSelected = Extension.create<NodeSelectedOptions>({
-  name: "nodeSelected",
+export const ExtensionNodeSelected =
+  Extension.create<ExtensionNodeSelectedOptions>({
+    name: "nodeSelected",
 
-  addOptions() {
-    return {
-      className: "has-node-selected",
-    };
-  },
+    addOptions() {
+      return {
+        className: "has-node-selected",
+      };
+    },
 
-  addProseMirrorPlugins() {
-    return [
-      new Plugin({
-        key: new PluginKey("nodeSelected"),
-        props: {
-          decorations: ({ doc, selection }) => {
-            const { isEditable, isFocused } = this.editor;
-            const { anchor } = selection;
-            const decorations: Decoration[] = [];
+    onUpdate({ transaction }) {
+      if (!transaction.docChanged) {
+        this.editor.commands.updateDecorations(this.name);
+      }
+    },
 
-            if (!isEditable || !isFocused) {
-              return DecorationSet.create(doc, []);
+    addDecorations() {
+      return {
+        create: ({ state }) => {
+          const { isEditable, isFocused } = this.editor;
+          const decorations: Decoration[] = [];
+
+          if (!isEditable || !isFocused) {
+            return decorations;
+          }
+
+          state.doc.descendants((node, pos) => {
+            if (node.isText) {
+              return false;
             }
 
-            doc.descendants((node, pos) => {
-              if (node.isText) {
-                return false;
-              }
-
-              const isCurrent =
-                anchor >= pos && anchor <= pos + node.nodeSize - 1;
-
-              if (!isCurrent) {
-                return false;
-              }
-
+            if (node.attrs.selected) {
               decorations.push(
-                Decoration.node(pos, pos + node.nodeSize, {
+                Decoration.Node(pos, pos + node.nodeSize, {
                   class: this.options.className,
                 })
               );
-            });
+            }
+            return true;
+          });
 
-            return DecorationSet.create(doc, decorations);
-          },
+          return decorations;
         },
-      }),
-    ];
-  },
-});
-
-export default NodeSelected;
+        shouldUpdate: ({ tr }) =>
+          tr.docChanged ||
+          tr.getMeta("focus") !== undefined ||
+          tr.getMeta("blur") !== undefined,
+      };
+    },
+  });

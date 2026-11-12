@@ -1,23 +1,14 @@
 package run.halo.app.security.authorization;
 
-import java.security.Principal;
-
 /**
  * @author guqing
  * @since 2.0.0
  */
 public class AttributesRecord implements Attributes {
     private final RequestInfo requestInfo;
-    private final Principal principal;
 
-    public AttributesRecord(Principal principal, RequestInfo requestInfo) {
+    public AttributesRecord(RequestInfo requestInfo) {
         this.requestInfo = requestInfo;
-        this.principal = principal;
-    }
-
-    @Override
-    public Principal getPrincipal() {
-        return this.principal;
     }
 
     @Override
@@ -28,9 +19,7 @@ public class AttributesRecord implements Attributes {
     @Override
     public boolean isReadOnly() {
         String verb = requestInfo.getVerb();
-        return "get".equals(verb)
-            || "list".equals(verb)
-            || "watch".equals(verb);
+        return "get".equals(verb) || "list".equals(verb) || "watch".equals(verb);
     }
 
     @Override

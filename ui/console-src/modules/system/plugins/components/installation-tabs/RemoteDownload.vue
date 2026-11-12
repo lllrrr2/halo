@@ -1,18 +1,13 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
-import { Dialog, Toast, VButton } from "@halo-dev/components";
 import type { Plugin } from "@halo-dev/api-client";
-import type { Ref } from "vue";
-import { inject } from "vue";
-import { ref } from "vue";
-import { useI18n } from "vue-i18n";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { Dialog, Toast, VAlert, VButton } from "@halo-dev/components";
 import { useQueryClient } from "@tanstack/vue-query";
-import type { PluginInstallationErrorResponse } from "../../types";
+import type { Ref } from "vue";
+import { inject, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { PLUGIN_ALREADY_EXISTS_TYPE } from "../../constants";
-import { useRouteQuery } from "@vueuse/router";
-import { onMounted } from "vue";
-import { nextTick } from "vue";
-import { submitForm } from "@formkit/core";
+import type { PluginInstallationErrorResponse } from "../../types";
 
 const emit = defineEmits<{
   (event: "close-modal"): void;
@@ -33,7 +28,7 @@ const handleDownloadPlugin = async () => {
   try {
     downloading.value = true;
     if (pluginToUpgrade.value) {
-      await apiClient.plugin.upgradePluginFromUri({
+      await consoleApiClient.plugin.plugin.upgradePluginFromUri({
         name: pluginToUpgrade.value.metadata.name,
         upgradeFromUriRequest: {
           uri: remoteDownloadUrl.value,
@@ -45,11 +40,12 @@ const handleDownloadPlugin = async () => {
       return;
     }
 
-    const { data: plugin } = await apiClient.plugin.installPluginFromUri({
-      installFromUriRequest: {
-        uri: remoteDownloadUrl.value,
-      },
-    });
+    const { data: plugin } =
+      await consoleApiClient.plugin.plugin.installPluginFromUri({
+        installFromUriRequest: {
+          uri: remoteDownloadUrl.value,
+        },
+      });
 
     emit("close-modal");
     queryClient.invalidateQueries({ queryKey: ["plugins"] });
@@ -65,7 +61,6 @@ const handleDownloadPlugin = async () => {
 
     console.error("Failed to download plugin", error);
   } finally {
-    routeRemoteDownloadUrl.value = null;
     downloading.value = false;
   }
 };
@@ -80,15 +75,11 @@ const handleShowActiveModalAfterInstall = (plugin: Plugin) => {
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
       try {
-        const { data: pluginToUpdate } =
-          await apiClient.extension.plugin.getpluginHaloRunV1alpha1Plugin({
-            name: plugin.metadata.name,
-          });
-        pluginToUpdate.spec.enabled = true;
-
-        await apiClient.extension.plugin.updatepluginHaloRunV1alpha1Plugin({
-          name: pluginToUpdate.metadata.name,
-          plugin: pluginToUpdate,
+        await consoleApiClient.plugin.plugin.changePluginRunningState({
+          name: plugin.metadata.name,
+          pluginRunningStateRequest: {
+            enable: true,
+          },
         });
 
         window.location.reload();
@@ -112,7 +103,7 @@ const handleCatchExistsException = async (
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
-      await apiClient.plugin.upgradePluginFromUri({
+      await consoleApiClient.plugin.plugin.upgradePluginFromUri({
         name: error.pluginName,
         upgradeFromUriRequest: {
           uri: remoteDownloadUrl.value,
@@ -125,23 +116,33 @@ const handleCatchExistsException = async (
     },
   });
 };
-
-// handle remote download url from route
-const routeRemoteDownloadUrl = useRouteQuery<string | null>(
-  "remote-download-url"
-);
-
-onMounted(() => {
-  if (routeRemoteDownloadUrl.value) {
-    remoteDownloadUrl.value = routeRemoteDownloadUrl.value;
-    nextTick(() => {
-      submitForm("plugin-remote-download-form");
-    });
-  }
-});
 </script>
 
 <template>
+  <div class="mb-4">
+    <VAlert
+      type="warning"
+      :title="$t('core.common.text.warning')"
+      :closable="false"
+    >
+      <template #description>
+        <i18n-t
+          keypath="core.plugin.upload_modal.security_alert.description"
+          tag="p"
+        >
+          <template #url>
+            <a
+              href="https://www.halo.run/store/apps"
+              target="_blank"
+              class="underline-offset-2 hover:text-gray-900 hover:underline"
+            >
+              {{ $t("core.common.text.official_app_store") }}
+            </a>
+          </template>
+        </i18n-t>
+      </template>
+    </VAlert>
+  </div>
   <FormKit
     id="plugin-remote-download-form"
     name="plugin-remote-download-form"

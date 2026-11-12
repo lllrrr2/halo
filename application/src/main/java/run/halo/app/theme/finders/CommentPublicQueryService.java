@@ -1,6 +1,6 @@
 package run.halo.app.theme.finders;
 
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import reactor.core.publisher.Mono;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.PageRequest;
@@ -17,16 +17,15 @@ import run.halo.app.theme.finders.vo.ReplyVo;
 public interface CommentPublicQueryService {
     Mono<CommentVo> getByName(String name);
 
-    Mono<ListResult<CommentVo>> list(Ref ref, @Nullable Integer page,
-        @Nullable Integer size);
+    Mono<ReplyVo> getReply(String commentName, String replyName);
+
+    Mono<ListResult<CommentVo>> list(Ref ref, @Nullable Integer page, @Nullable Integer size);
 
     Mono<ListResult<CommentVo>> list(Ref ref, @Nullable PageRequest pageRequest);
 
-    Mono<ListResult<CommentWithReplyVo>> convertToWithReplyVo(ListResult<CommentVo> comments,
-        int replySize);
+    Mono<ListResult<CommentWithReplyVo>> convertToWithReplyVo(ListResult<CommentVo> comments, int replySize);
 
-    Mono<ListResult<ReplyVo>> listReply(String commentName, @Nullable Integer page,
-        @Nullable Integer size);
+    Mono<ListResult<ReplyVo>> listReply(String commentName, @Nullable Integer page, @Nullable Integer size);
 
     Mono<ListResult<ReplyVo>> listReply(String commentName, PageRequest pageRequest);
 }

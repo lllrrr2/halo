@@ -1,5 +1,8 @@
 package run.halo.app.theme.finders.vo;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -19,8 +22,10 @@ import run.halo.app.extension.MetadataOperator;
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
+@Schema(description = "A value object for a post.")
 public class ListedPostVo implements ExtensionVoOperator {
 
+    @Schema(requiredMode = REQUIRED)
     private MetadataOperator metadata;
 
     private Post.PostSpec spec;
@@ -48,12 +53,12 @@ public class ListedPostVo implements ExtensionVoOperator {
         Post.PostSpec spec = post.getSpec();
         Post.PostStatus postStatus = post.getStatusOrDefault();
         return ListedPostVo.builder()
-            .metadata(post.getMetadata())
-            .spec(spec)
-            .status(postStatus)
-            .categories(List.of())
-            .tags(List.of())
-            .contributors(List.of())
-            .build();
+                .metadata(post.getMetadata())
+                .spec(spec)
+                .status(postStatus)
+                .categories(List.of())
+                .tags(List.of())
+                .contributors(List.of())
+                .build();
     }
 }

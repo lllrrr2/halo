@@ -1,22 +1,21 @@
 <script lang="ts" setup>
-import type { Component } from "vue";
+import { useHaloKeyboardShortcut } from "@/composables/use-halo-keyboard-shortcut";
+import type { ToolbarItemComponentProps } from "@/types";
+import { formatShortcut } from "@/utils";
+import DropdownItem from "../base/DropdownItem.vue";
 
 const props = withDefaults(
-  defineProps<{
-    isActive?: boolean;
-    disabled?: boolean;
-    title?: string;
-    action?: () => void;
-    icon?: Component;
-  }>(),
+  defineProps<
+    ToolbarItemComponentProps & {
+      selectionIndicator?: "leading" | "trailing";
+    }
+  >(),
   {
-    isActive: false,
-    disabled: false,
-    title: undefined,
-    action: undefined,
-    icon: undefined,
+    selectionIndicator: "leading",
   }
 );
+
+const shortcut = useHaloKeyboardShortcut(props.editor, () => props.shortcutId);
 
 const action = () => {
   if (props.disabled) return;
@@ -25,31 +24,23 @@ const action = () => {
 </script>
 
 <template>
-  <div
-    :class="[
-      { '!bg-gray-100': isActive },
-      { 'cursor-not-allowed opacity-70 ': disabled },
-      { 'hover:bg-gray-100': !disabled },
-    ]"
-    class="flex flex-row items-center rounded gap-4 p-1 group cursor-pointer"
+  <DropdownItem
+    :disabled="disabled"
+    :is-active="isActive"
+    :selection-indicator="selectionIndicator"
     @click="action"
   >
-    <component
-      :is="icon"
-      class="bg-gray-100 p-1 rounded w-6 h-6"
-      :class="[
-        { '!bg-white': isActive },
-        { 'group-hover:bg-white': !disabled },
-      ]"
-    />
-    <span
-      class="text-xs text-gray-600"
-      :class="[
-        { '!text-gray-900 !font-medium': isActive },
-        { 'group-hover:font-medium group-hover:text-gray-900': !disabled },
-      ]"
-    >
-      {{ title }}
-    </span>
-  </div>
+    <template v-if="icon" #icon>
+      <component :is="icon" />
+    </template>
+    {{ title }}
+    <template v-if="shortcut" #suffix>
+      <span
+        class="flex-none text-xs font-normal text-gray-400/80"
+        :aria-label="formatShortcut(shortcut.keys[0])"
+      >
+        {{ formatShortcut(shortcut.keys[0]) }}
+      </span>
+    </template>
+  </DropdownItem>
 </template>

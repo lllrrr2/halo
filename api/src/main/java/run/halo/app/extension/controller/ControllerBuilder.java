@@ -7,6 +7,7 @@ import org.springframework.util.Assert;
 import run.halo.app.extension.Extension;
 import run.halo.app.extension.ExtensionClient;
 import run.halo.app.extension.ExtensionMatcher;
+import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.WatcherExtensionMatchers;
 import run.halo.app.extension.controller.Reconciler.Request;
 
@@ -29,6 +30,8 @@ public class ControllerBuilder {
     private ExtensionMatcher onDeleteMatcher;
 
     private ExtensionMatcher onUpdateMatcher;
+
+    private ListOptions syncAllListOptions;
 
     private final ExtensionClient client;
 
@@ -84,6 +87,11 @@ public class ControllerBuilder {
         return this;
     }
 
+    public ControllerBuilder syncAllListOptions(ListOptions syncAllListOptions) {
+        this.syncAllListOptions = syncAllListOptions;
+        return this;
+    }
+
     public ControllerBuilder workerCount(int workerCount) {
         this.workerCount = workerCount;
         return this;
@@ -99,25 +107,26 @@ public class ControllerBuilder {
         if (maxDelay == null || maxDelay.isNegative() || maxDelay.isZero()) {
             maxDelay = Duration.ofSeconds(1000);
         }
-        Assert.isTrue(minDelay.compareTo(maxDelay) <= 0,
-            "Min delay must be less than or equal to max delay");
+        Assert.isTrue(minDelay.compareTo(maxDelay) <= 0, "Min delay must be less than or equal to max delay");
         Assert.notNull(extension, "Extension must not be null");
         Assert.notNull(reconciler, "Reconciler must not be null");
 
         var queue = new DefaultQueue<Request>(nowSupplier, minDelay);
-        var extensionMatchers = WatcherExtensionMatchers.builder(client,
-                extension.groupVersionKind())
-            .onAddMatcher(onAddMatcher)
-            .onUpdateMatcher(onUpdateMatcher)
-            .onDeleteMatcher(onDeleteMatcher)
-            .build();
+        var extensionMatchers = WatcherExtensionMatchers.builder(client, extension.groupVersionKind())
+                .onAddMatcher(onAddMatcher)
+                .onUpdateMatcher(onUpdateMatcher)
+                .onDeleteMatcher(onDeleteMatcher)
+                .build();
         var watcher = new ExtensionWatcher(queue, extensionMatchers);
-        var synchronizer = new RequestSynchronizer(syncAllOnStart,
-            client,
-            extension,
-            watcher,
-            extensionMatchers.onAddMatcher());
-        return new DefaultController<>(name, reconciler, queue, synchronizer, minDelay, maxDelay,
-            workerCount);
+        var synchronizer =
+                new RequestSynchronizer(syncAllOnStart, client, extension, watcher, determineSyncAllListOptions());
+        return new DefaultController<>(name, reconciler, queue, synchronizer, minDelay, maxDelay, workerCount);
+    }
+
+    ListOptions determineSyncAllListOptions() {
+        if (syncAllListOptions != null) {
+            return syncAllListOptions;
+        }
+        return new ListOptions();
     }
 }

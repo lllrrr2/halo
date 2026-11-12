@@ -1,13 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
-import CategoryEditingModal from "../CategoryEditingModal.vue";
-import { createPinia, setActivePinia } from "pinia";
-import { createI18n } from "vue-i18n";
+import { utils } from "@halo-dev/ui-shared";
 import messages from "@intlify/unplugin-vue-i18n/messages";
+import { VueQueryPlugin } from "@tanstack/vue-query";
+import { mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { createI18n } from "vue-i18n";
+import CategoryEditingModal from "../CategoryEditingModal.vue";
 
 describe("CategoryEditingModal", function () {
   beforeEach(() => {
     setActivePinia(createPinia());
+    utils.permission.setUserPermissions([]);
   });
 
   it("should render", function () {
@@ -20,6 +23,7 @@ describe("CategoryEditingModal", function () {
               locale: "en",
               messages,
             }),
+            VueQueryPlugin,
           ],
         },
       })

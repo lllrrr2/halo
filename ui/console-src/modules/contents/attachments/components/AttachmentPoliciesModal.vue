@@ -1,131 +1,84 @@
 <script lang="ts" setup>
+import type { Policy, PolicyTemplate } from "@halo-dev/api-client";
 import {
   IconAddCircle,
   VButton,
-  VModal,
-  VSpace,
-  VEmpty,
-  Dialog,
-  VEntity,
-  VEntityField,
-  VStatusDot,
   VDropdown,
   VDropdownItem,
-  Toast,
+  VEmpty,
+  VEntityContainer,
+  VModal,
+  VSpace,
 } from "@halo-dev/components";
-import AttachmentPolicyEditingModal from "./AttachmentPolicyEditingModal.vue";
-import { ref } from "vue";
-import type { Policy, PolicyTemplate } from "@halo-dev/api-client";
-import { formatDatetime } from "@/utils/date";
+import { onMounted, ref, toRaw } from "vue";
 import {
   useFetchAttachmentPolicy,
   useFetchAttachmentPolicyTemplate,
 } from "../composables/use-attachment-policy";
-import { apiClient } from "@/utils/api-client";
-import { useI18n } from "vue-i18n";
+import AttachmentPoliciesListItem from "./AttachmentPoliciesListItem.vue";
+import AttachmentPolicyEditingModal from "./AttachmentPolicyEditingModal.vue";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
-    visible: boolean;
+    selectMode?: boolean;
+    selectedName?: string;
   }>(),
   {
-    visible: false,
+    selectMode: false,
+    selectedName: undefined,
   }
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
+  (event: "select", policyName: string): void;
 }>();
 
-const { t } = useI18n();
+const {
+  data: policies,
+  isLoading,
+  refetch: handleFetchPolicies,
+} = useFetchAttachmentPolicy();
+const { data: policyTemplates } = useFetchAttachmentPolicyTemplate();
 
-const { policies, isLoading, handleFetchPolicies } = useFetchAttachmentPolicy();
-const { policyTemplates } = useFetchAttachmentPolicyTemplate();
-
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 const selectedPolicy = ref<Policy>();
+const selectedTemplateName = ref();
 
-const policyEditingModal = ref(false);
-
-function onVisibleChange(visible: boolean) {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-}
-
-const handleOpenEditingModal = (policy: Policy) => {
-  selectedPolicy.value = policy;
-  policyEditingModal.value = true;
-};
+const creationModalVisible = ref(false);
 
 const handleOpenCreateNewPolicyModal = (policyTemplate: PolicyTemplate) => {
-  selectedPolicy.value = {
-    spec: {
-      displayName: "",
-      templateName: policyTemplate.metadata.name,
-      configMapName: "",
-    },
-    apiVersion: "storage.halo.run/v1alpha1",
-    kind: "Policy",
-    metadata: {
-      name: "",
-      generateName: "attachment-policy-",
-    },
-  };
-  policyEditingModal.value = true;
+  selectedTemplateName.value = policyTemplate.metadata.name;
+  creationModalVisible.value = true;
 };
 
-const handleDelete = async (policy: Policy) => {
-  const { data } = await apiClient.attachment.searchAttachments({
-    fieldSelector: [`spec.policyName=${policy.metadata.name}`],
-  });
-
-  if (data.total > 0) {
-    Dialog.warning({
-      title: t(
-        "core.attachment.policies_modal.operations.can_not_delete.title"
-      ),
-      description: t(
-        "core.attachment.policies_modal.operations.can_not_delete.description"
-      ),
-      confirmText: t("core.common.buttons.confirm"),
-      cancelText: t("core.common.buttons.cancel"),
-    });
-    return;
-  }
-
-  Dialog.warning({
-    title: t("core.attachment.policies_modal.operations.delete.title"),
-    description: t(
-      "core.attachment.policies_modal.operations.delete.description"
-    ),
-    confirmText: t("core.common.buttons.confirm"),
-    cancelText: t("core.common.buttons.cancel"),
-    onConfirm: async () => {
-      await apiClient.extension.storage.policy.deletestorageHaloRunV1alpha1Policy(
-        { name: policy.metadata.name }
-      );
-
-      Toast.success(t("core.common.toast.delete_success"));
-      handleFetchPolicies();
-    },
-  });
-};
-
-const onEditingModalClose = () => {
+const onCreationModalClose = () => {
   selectedPolicy.value = undefined;
-  handleFetchPolicies();
+  selectedTemplateName.value = undefined;
+  creationModalVisible.value = false;
 };
+
+const currentSelectedName = ref();
+
+onMounted(() => {
+  currentSelectedName.value = toRaw(props.selectedName);
+});
+
+function handleConfirm() {
+  emit("select", currentSelectedName.value);
+  modal.value?.close();
+}
 </script>
 <template>
   <VModal
-    :visible="visible"
+    ref="modal"
     :width="750"
     :title="$t('core.attachment.policies_modal.title')"
     :body-class="['!p-0']"
     :layer-closable="true"
-    @update:visible="onVisibleChange"
+    :centered="false"
+    :mount-to-body="true"
+    @close="emit('close')"
   >
     <template #actions>
       <VDropdown>
@@ -134,8 +87,8 @@ const onEditingModalClose = () => {
         </span>
         <template #popper>
           <VDropdownItem
-            v-for="(policyTemplate, index) in policyTemplates"
-            :key="index"
+            v-for="policyTemplate in policyTemplates"
+            :key="policyTemplate.metadata.name"
             @click="handleOpenCreateNewPolicyModal(policyTemplate)"
           >
             {{ policyTemplate.spec?.displayName }}
@@ -156,14 +109,14 @@ const onEditingModalClose = () => {
           <VDropdown>
             <VButton type="secondary">
               <template #icon>
-                <IconAddCircle class="h-full w-full" />
+                <IconAddCircle />
               </template>
               {{ $t("core.common.buttons.new") }}
             </VButton>
             <template #popper>
               <VDropdownItem
-                v-for="(policyTemplate, index) in policyTemplates"
-                :key="index"
+                v-for="policyTemplate in policyTemplates"
+                :key="policyTemplate.metadata.name"
                 @click="handleOpenCreateNewPolicyModal(policyTemplate)"
               >
                 {{ policyTemplate.spec?.displayName }}
@@ -173,59 +126,38 @@ const onEditingModalClose = () => {
         </VSpace>
       </template>
     </VEmpty>
-    <ul
-      v-else
-      class="box-border h-full w-full divide-y divide-gray-100"
-      role="list"
-    >
-      <li v-for="(policy, index) in policies" :key="index">
-        <VEntity>
-          <template #start>
-            <VEntityField
-              :title="policy.spec.displayName"
-              :description="policy.spec.templateName"
-            ></VEntityField>
-          </template>
-          <template #end>
-            <VEntityField v-if="policy.metadata.deletionTimestamp">
-              <template #description>
-                <VStatusDot
-                  v-tooltip="$t('core.common.status.deleting')"
-                  state="warning"
-                  animate
-                />
-              </template>
-            </VEntityField>
-            <VEntityField>
-              <template #description>
-                <span class="truncate text-xs tabular-nums text-gray-500">
-                  {{ formatDatetime(policy.metadata.creationTimestamp) }}
-                </span>
-              </template>
-            </VEntityField>
-          </template>
-          <template #dropdownItems>
-            <VDropdownItem @click="handleOpenEditingModal(policy)">
-              {{ $t("core.common.buttons.edit") }}
-            </VDropdownItem>
-            <VDropdownItem type="danger" @click="handleDelete(policy)">
-              {{ $t("core.common.buttons.delete") }}
-            </VDropdownItem>
-          </template>
-        </VEntity>
-      </li>
-    </ul>
+    <VEntityContainer v-else>
+      <AttachmentPoliciesListItem
+        v-for="policy in policies"
+        :key="policy.metadata.name"
+        :policy="policy"
+        class="cursor-pointer"
+      >
+        <template v-if="selectMode" #checkbox>
+          <input
+            v-model="currentSelectedName"
+            :value="policy.metadata.name"
+            type="radio"
+          />
+        </template>
+      </AttachmentPoliciesListItem>
+    </VEntityContainer>
     <template #footer>
-      <VButton @click="onVisibleChange(false)">
-        {{ $t("core.common.buttons.close_and_shortcut") }}
-      </VButton>
+      <VSpace>
+        <VButton v-if="selectMode" type="secondary" @click="handleConfirm">
+          {{ $t("core.common.buttons.confirm") }}
+        </VButton>
+        <VButton @click="modal?.close()">
+          {{ $t("core.common.buttons.close_and_shortcut") }}
+        </VButton>
+      </VSpace>
     </template>
   </VModal>
 
   <AttachmentPolicyEditingModal
-    v-if="visible"
-    v-model:visible="policyEditingModal"
+    v-if="creationModalVisible"
     :policy="selectedPolicy"
-    @close="onEditingModalClose"
+    :template-name="selectedTemplateName"
+    @close="onCreationModalClose"
   />
 </template>

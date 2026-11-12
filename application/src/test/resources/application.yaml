@@ -5,14 +5,14 @@ spring:
     ansi:
       enabled: detect
   r2dbc:
-    name: halo-test
+    url: "r2dbc:h2:mem:///?options=MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
     generate-unique-name: true
   sql:
     init:
       mode: always
       platform: h2
   messages:
-      basename: config.i18n.messages
+    basename: config.i18n.messages
 
 halo:
   work-dir: ${user.home}/halo-next-test
@@ -27,6 +27,9 @@ halo:
   extension:
     controller:
       disabled: true
+  search-engine:
+    lucene:
+      enabled: false
 
 springdoc:
   api-docs:

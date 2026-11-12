@@ -1,9 +1,9 @@
 <script lang="ts" setup>
-// core libs
-import { computed, nextTick, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-
-// components
+import useSlugify from "@console/composables/use-slugify";
+import { useThemeCustomTemplates } from "@console/modules/interface/themes/composables/use-theme";
+import { reset, submitForm, type FormKitNode } from "@formkit/core";
+import type { Category } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
   IconRefreshLine,
   Toast,
@@ -11,50 +11,44 @@ import {
   VModal,
   VSpace,
 } from "@halo-dev/components";
-import SubmitButton from "@/components/button/SubmitButton.vue";
-
-// types
-import type { Category } from "@halo-dev/api-client";
-
-// libs
-import { cloneDeep } from "lodash-es";
-import { reset } from "@formkit/core";
-import { setFocus } from "@/formkit/utils/focus";
-import { useThemeCustomTemplates } from "@console/modules/interface/themes/composables/use-theme";
-import AnnotationsForm from "@/components/form/AnnotationsForm.vue";
-import useSlugify from "@console/composables/use-slugify";
+import { FormType } from "@halo-dev/ui-shared";
+import { useQueryClient } from "@tanstack/vue-query";
+import { cloneDeep } from "es-toolkit";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { FormType } from "@/types/slug";
+import SubmitButton from "@/components/button/SubmitButton.vue";
+import type AnnotationsForm from "@/components/form/AnnotationsForm.vue";
+import { setFocus } from "@/formkit/utils/focus";
+import { buildCategoryParentMovePosition } from "../utils";
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
     category?: Category;
     parentCategory?: Category;
   }>(),
   {
-    visible: false,
     category: undefined,
     parentCategory: undefined,
   }
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
+const queryClient = useQueryClient();
 const { t } = useI18n();
 
-const initialFormState: Category = {
+const formState = ref<Category>({
   spec: {
     displayName: "",
     slug: "",
     description: "",
     cover: "",
     template: "",
+    postTemplate: "",
     priority: 0,
-    children: [],
+    preventParentPostCascadeQuery: false,
   },
   status: {},
   apiVersion: "content.halo.run/v1alpha1",
@@ -63,23 +57,32 @@ const initialFormState: Category = {
     name: "",
     generateName: "category-",
   },
-};
-
-const formState = ref<Category>(cloneDeep(initialFormState));
-const selectedParentCategory = ref("");
+});
+const selectedParentCategory = ref<string>(
+  props.parentCategory?.metadata.name || props.category?.spec.parent || ""
+);
+const originalParentCategory = ref<string>(props.category?.spec.parent || "");
 const saving = ref(false);
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const keepAddingSubmit = ref(false);
 
-const isUpdateMode = computed(() => {
-  return !!formState.value.metadata.creationTimestamp;
-});
+const isUpdateMode = !!props.category;
 
-const modalTitle = computed(() => {
-  return isUpdateMode.value
-    ? t("core.post_category.editing_modal.titles.update")
-    : t("core.post_category.editing_modal.titles.create");
-});
+const modalTitle = props.category
+  ? t("core.post_category.editing_modal.titles.update")
+  : t("core.post_category.editing_modal.titles.create");
 
 const annotationsFormRef = ref<InstanceType<typeof AnnotationsForm>>();
+
+const excludedParentNames = computed(() => {
+  return props.category?.metadata.name ? [props.category.metadata.name] : [];
+});
+
+const isChildCategory = computed(() => !!selectedParentCategory.value);
+
+const refreshCategories = () => {
+  return queryClient.invalidateQueries({ queryKey: ["post-categories"] });
+};
 
 const handleSaveCategory = async () => {
   annotationsFormRef.value?.handleSubmit();
@@ -98,96 +101,101 @@ const handleSaveCategory = async () => {
 
   try {
     saving.value = true;
-    if (isUpdateMode.value) {
-      await apiClient.extension.category.updatecontentHaloRunV1alpha1Category({
+    if (isUpdateMode) {
+      await coreApiClient.content.category.updateCategory({
         name: formState.value.metadata.name,
         category: formState.value,
       });
-    } else {
-      // Gets parent category, calculates priority and updates it.
-      let parentCategory: Category | undefined = undefined;
 
-      if (selectedParentCategory.value) {
-        const { data } =
-          await apiClient.extension.category.getcontentHaloRunV1alpha1Category({
-            name: selectedParentCategory.value,
+      const positionRequest = buildCategoryParentMovePosition(
+        formState.value.metadata.name,
+        originalParentCategory.value,
+        selectedParentCategory.value
+      );
+
+      if (positionRequest) {
+        try {
+          await consoleApiClient.content.category.updateCategoryPosition({
+            name: positionRequest.name,
+            categoryPositionRequest: {
+              parentName: positionRequest.parentName,
+              beforeName: positionRequest.beforeName,
+            },
           });
-        parentCategory = data;
+        } catch (e) {
+          console.error("Failed to update category parent", e);
+          await refreshCategories();
+          Toast.error(t("core.common.toast.save_failed_and_retry"));
+          return;
+        }
+      }
+    } else {
+      const parentName = selectedParentCategory.value || undefined;
+      if (parentName) {
+        formState.value.spec.parent = parentName;
+      } else {
+        delete formState.value.spec.parent;
       }
 
-      const priority = parentCategory?.spec.children
-        ? parentCategory.spec.children.length + 1
-        : 0;
+      formState.value.spec.priority = await getNextPriority(parentName);
 
-      formState.value.spec.priority = priority;
-
-      const { data: createdCategory } =
-        await apiClient.extension.category.createcontentHaloRunV1alpha1Category(
-          {
-            category: formState.value,
-          }
-        );
-
-      if (parentCategory) {
-        parentCategory.spec.children = Array.from(
-          new Set([
-            ...(parentCategory.spec.children || []),
-            createdCategory.metadata.name,
-          ])
-        );
-
-        await apiClient.extension.category.updatecontentHaloRunV1alpha1Category(
-          {
-            name: selectedParentCategory.value,
-            category: parentCategory,
-          }
-        );
-      }
+      await coreApiClient.content.category.createCategory({
+        category: formState.value,
+      });
     }
-    onVisibleChange(false);
+
+    await refreshCategories();
+
+    if (keepAddingSubmit.value) {
+      reset("category-form");
+    } else {
+      modal.value?.close();
+    }
 
     Toast.success(t("core.common.toast.save_success"));
   } catch (e) {
-    console.error("Failed to create category", e);
+    console.error("Failed to save category", e);
   } finally {
     saving.value = false;
   }
 };
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
+const handleSubmit = (keepAdding = false) => {
+  keepAddingSubmit.value = keepAdding;
+  submitForm("category-form");
 };
 
-const handleResetForm = () => {
-  selectedParentCategory.value = "";
-  formState.value = cloneDeep(initialFormState);
-  reset("category-form");
-};
+async function getNextPriority(parentName?: string) {
+  const { data } = await coreApiClient.content.category.listCategory({
+    page: 1,
+    size: 1000,
+  });
 
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      if (props.parentCategory) {
-        selectedParentCategory.value = props.parentCategory.metadata.name;
-      }
-
-      if (props.category) {
-        formState.value = cloneDeep(props.category);
-      }
-
-      setFocus("displayNameInput");
-    } else {
-      handleResetForm();
+  return data.items.filter((category) => {
+    if (parentName) {
+      return category.spec.parent === parentName;
     }
+    return !category.spec.parent;
+  }).length;
+}
+
+onMounted(() => {
+  if (props.category) {
+    formState.value = cloneDeep(props.category);
   }
-);
+  setFocus("displayNameInput");
+});
 
 // custom templates
-const { templates } = useThemeCustomTemplates("category");
+const {
+  templates,
+  isInitialLoading: templatesLoading,
+  isError: templatesError,
+} = useThemeCustomTemplates("category", () => formState.value.spec.template);
+const { templates: postTemplates } = useThemeCustomTemplates(
+  "post",
+  () => formState.value.spec.postTemplate
+);
 
 // slug
 const { handleGenerateSlug } = useSlugify(
@@ -200,16 +208,41 @@ const { handleGenerateSlug } = useSlugify(
       formState.value.spec.slug = value;
     },
   }),
-  computed(() => !isUpdateMode.value),
+  computed(() => !isUpdateMode),
   FormType.CATEGORY
 );
+
+// fixme: check if slug is unique
+// Finally, we need to check if the slug is unique in the database
+async function slugUniqueValidation(node: FormKitNode) {
+  const value = node.value;
+  if (!value) {
+    return true;
+  }
+
+  const fieldSelector = [`spec.slug=${value}`];
+
+  if (props.category) {
+    fieldSelector.push(`metadata.name!=${props.category.metadata.name}`);
+  }
+
+  const { data: categoriesWithSameSlug } =
+    await coreApiClient.content.category.listCategory({
+      fieldSelector,
+      page: 1,
+      size: 1,
+    });
+
+  return !categoriesWithSameSlug.total;
+}
 </script>
 <template>
   <VModal
+    ref="modal"
+    mount-to-body
     :title="modalTitle"
-    :visible="visible"
     :width="700"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <FormKit
       id="category-form"
@@ -229,9 +262,10 @@ const { handleGenerateSlug } = useSlugify(
           </div>
           <div class="mt-5 divide-y divide-gray-100 md:col-span-3 md:mt-0">
             <FormKit
-              v-if="!isUpdateMode"
               v-model="selectedParentCategory"
               type="categorySelect"
+              :excluded-names="excludedParentNames"
+              :allow-create="!isUpdateMode"
               :label="
                 $t('core.post_category.editing_modal.fields.parent.label')
               "
@@ -244,7 +278,7 @@ const { handleGenerateSlug } = useSlugify(
                 $t('core.post_category.editing_modal.fields.display_name.label')
               "
               type="text"
-              validation="required|length:0,50"
+              validation="required|length:0,512"
             ></FormKit>
             <FormKit
               v-model="formState.spec.slug"
@@ -252,7 +286,13 @@ const { handleGenerateSlug } = useSlugify(
               name="slug"
               :label="$t('core.post_category.editing_modal.fields.slug.label')"
               type="text"
-              validation="required|length:0,50"
+              validation="required|length:0,512|slugUniqueValidation"
+              :validation-rules="{ slugUniqueValidation }"
+              :validation-messages="{
+                slugUniqueValidation: $t(
+                  'core.common.form.validation.slug_unique'
+                ),
+              }"
             >
               <template #suffix>
                 <div
@@ -262,7 +302,7 @@ const { handleGenerateSlug } = useSlugify(
                     )
                   "
                   class="group flex h-full cursor-pointer items-center border-l px-3 transition-all hover:bg-gray-100"
-                  @click="handleGenerateSlug(true, FormType.CATEGORY)"
+                  @click="handleGenerateSlug(true)"
                 >
                   <IconRefreshLine
                     class="h-4 w-4 text-gray-500 group-hover:text-gray-700"
@@ -273,11 +313,30 @@ const { handleGenerateSlug } = useSlugify(
             <FormKit
               v-model="formState.spec.template"
               :options="templates"
+              :disabled="templatesLoading || templatesError"
               :label="
                 $t('core.post_category.editing_modal.fields.template.label')
               "
+              :help="
+                $t('core.post_category.editing_modal.fields.template.help')
+              "
               type="select"
               name="template"
+            ></FormKit>
+            <FormKit
+              v-model="formState.spec.postTemplate"
+              :options="postTemplates"
+              :disabled="templatesLoading || templatesError"
+              :label="
+                $t(
+                  'core.post_category.editing_modal.fields.post_template.label'
+                )
+              "
+              :help="
+                $t('core.post_category.editing_modal.fields.post_template.help')
+              "
+              type="select"
+              name="postTemplate"
             ></FormKit>
             <FormKit
               v-model="formState.spec.cover"
@@ -289,6 +348,37 @@ const { handleGenerateSlug } = useSlugify(
               validation="length:0,1024"
             ></FormKit>
             <FormKit
+              v-model="formState.spec.hideFromList"
+              :disabled="isChildCategory"
+              :label="
+                $t(
+                  'core.post_category.editing_modal.fields.hide_from_list.label'
+                )
+              "
+              :help="
+                $t(
+                  'core.post_category.editing_modal.fields.hide_from_list.help'
+                )
+              "
+              type="checkbox"
+              name="hideFromList"
+            ></FormKit>
+            <FormKit
+              v-model="formState.spec.preventParentPostCascadeQuery"
+              :label="
+                $t(
+                  'core.post_category.editing_modal.fields.prevent_parent_post_cascade_query.label'
+                )
+              "
+              :help="
+                $t(
+                  'core.post_category.editing_modal.fields.prevent_parent_post_cascade_query.help'
+                )
+              "
+              type="checkbox"
+              name="preventParentPostCascadeQuery"
+            ></FormKit>
+            <FormKit
               v-model="formState.spec.description"
               name="description"
               :help="
@@ -298,6 +388,8 @@ const { handleGenerateSlug } = useSlugify(
                 $t('core.post_category.editing_modal.fields.description.label')
               "
               type="textarea"
+              auto-height
+              :max-auto-height="200"
               validation="length:0,200"
             ></FormKit>
           </div>
@@ -321,6 +413,7 @@ const { handleGenerateSlug } = useSlugify(
         <AnnotationsForm
           :key="formState.metadata.name"
           ref="annotationsFormRef"
+          :form-data="formState"
           :value="formState.metadata.annotations"
           kind="Category"
           group="content.halo.run"
@@ -329,19 +422,29 @@ const { handleGenerateSlug } = useSlugify(
     </div>
 
     <template #footer>
-      <VSpace>
-        <SubmitButton
-          v-if="visible"
-          :loading="saving"
-          type="secondary"
-          :text="$t('core.common.buttons.submit')"
-          @submit="$formkit.submit('category-form')"
-        >
-        </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+      <div class="flex justify-between">
+        <VSpace>
+          <SubmitButton
+            :loading="saving && !keepAddingSubmit"
+            :disabled="saving && keepAddingSubmit"
+            type="secondary"
+            :text="$t('core.common.buttons.submit')"
+            @submit="handleSubmit"
+          >
+          </SubmitButton>
+          <VButton
+            v-if="!isUpdateMode"
+            :loading="saving && keepAddingSubmit"
+            :disabled="saving && !keepAddingSubmit"
+            @click="handleSubmit(true)"
+          >
+            {{ $t("core.common.buttons.save_and_continue") }}
+          </VButton>
+        </VSpace>
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
-      </VSpace>
+      </div>
     </template>
   </VModal>
 </template>

@@ -1,85 +1,32 @@
 <script lang="ts" setup>
-// core libs
-import { nextTick, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
 import type { User } from "@halo-dev/api-client";
-
-// components
+import { consoleApiClient } from "@halo-dev/api-client";
 import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import SubmitButton from "@/components/button/SubmitButton.vue";
-
-// libs
-import { cloneDeep } from "lodash-es";
-import { reset } from "@formkit/core";
-
-// hooks
-import { setFocus } from "@/formkit/utils/focus";
-import AnnotationsForm from "@/components/form/AnnotationsForm.vue";
-import { useI18n } from "vue-i18n";
+import { utils } from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
+import { cloneDeep } from "es-toolkit";
+import { nextTick, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import SubmitButton from "@/components/button/SubmitButton.vue";
+import type AnnotationsForm from "@/components/form/AnnotationsForm.vue";
 
 const { t } = useI18n();
 const queryClient = useQueryClient();
 
 const props = withDefaults(
   defineProps<{
-    visible: boolean;
-    user?: User;
+    user: User;
   }>(),
-  {
-    visible: false,
-    user: undefined,
-  }
+  {}
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const initialFormState: User = {
-  spec: {
-    displayName: "",
-    email: "",
-    phone: "",
-    password: "",
-    bio: "",
-    disabled: false,
-    loginHistoryLimit: 0,
-  },
-  apiVersion: "v1alpha1",
-  kind: "User",
-  metadata: {
-    name: "",
-  },
-};
-
-const formState = ref<User>(cloneDeep(initialFormState));
-const saving = ref(false);
-
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("user-form");
-};
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      if (props.user) formState.value = cloneDeep(props.user);
-      setFocus("displayNameInput");
-    } else {
-      handleResetForm();
-    }
-  }
-);
-
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const formState = ref<User>(cloneDeep(props.user));
+const isSubmitting = ref(false);
 
 const annotationsFormRef = ref<InstanceType<typeof AnnotationsForm>>();
 
@@ -99,14 +46,26 @@ const handleUpdateUser = async () => {
   };
 
   try {
-    saving.value = true;
+    isSubmitting.value = true;
 
-    await apiClient.extension.user.updatev1alpha1User({
+    if (formState.value.spec.displayName) {
+      formState.value.spec.displayName =
+        formState.value.spec.displayName.trim();
+    }
+
+    await consoleApiClient.user.updateUserProfile({
       name: formState.value.metadata.name,
-      user: formState.value,
+      updateUserProfileRequest: {
+        displayName: formState.value.spec.displayName,
+        email: formState.value.spec.email || "",
+        avatar: formState.value.spec.avatar,
+        phone: formState.value.spec.phone,
+        bio: formState.value.spec.bio,
+        annotations: formState.value.metadata.annotations,
+      },
     });
 
-    onVisibleChange(false);
+    modal.value?.close();
 
     queryClient.invalidateQueries({ queryKey: ["users"] });
     queryClient.invalidateQueries({ queryKey: ["user-detail"] });
@@ -115,16 +74,16 @@ const handleUpdateUser = async () => {
   } catch (e) {
     console.error("Failed to create or update user", e);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 </script>
 <template>
   <VModal
+    ref="modal"
     :title="$t('core.user.editing_modal.titles.update')"
-    :visible="visible"
     :width="700"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <FormKit
       id="user-form"
@@ -161,23 +120,19 @@ const handleUpdateUser = async () => {
             ></FormKit>
             <FormKit
               v-model="formState.spec.email"
+              :disabled="!utils.permission.has(['*'])"
               :label="$t('core.user.editing_modal.fields.email.label')"
               type="email"
               name="email"
               validation="required|email|length:0,100"
             ></FormKit>
             <FormKit
-              v-model="formState.spec.phone"
-              :label="$t('core.user.editing_modal.fields.phone.label')"
-              type="text"
-              name="phone"
-              validation="length:0,20"
-            ></FormKit>
-            <FormKit
               v-model="formState.spec.bio"
               :label="$t('core.user.editing_modal.fields.bio.label')"
               type="textarea"
               name="bio"
+              auto-height
+              :max-auto-height="200"
               validation="length:0,2048"
             ></FormKit>
           </div>
@@ -202,6 +157,7 @@ const handleUpdateUser = async () => {
           :key="formState.metadata.name"
           ref="annotationsFormRef"
           :value="formState.metadata.annotations"
+          :form-data="formState"
           kind="User"
           group=""
         />
@@ -210,14 +166,13 @@ const handleUpdateUser = async () => {
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('user-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

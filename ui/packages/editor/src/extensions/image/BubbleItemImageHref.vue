@@ -1,37 +1,77 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import Input from "@/components/base/Input.vue";
+import { ExtensionImage, ExtensionLink } from "@/extensions";
 import { i18n } from "@/locales";
-import type { Editor } from "@/tiptap/vue-3";
-import { computed, type Component } from "vue";
-import Image from "./index";
+import type { BubbleItemComponentProps } from "@/types";
+import { isAllowedUri } from "@/utils/is-allowed-uri";
+import { IMAGE_LINK_TARGET_BLANK, IMAGE_LINK_TARGET_SELF } from "./constants";
 
-const props = defineProps<{
-  editor: Editor;
-  isActive: ({ editor }: { editor: Editor }) => boolean;
-  visible?: ({ editor }: { editor: Editor }) => boolean;
-  icon?: Component;
-  title?: string;
-  action?: ({ editor }: { editor: Editor }) => void;
-}>();
+const props = defineProps<BubbleItemComponentProps>();
+
+const getImageLinkAttributes = () => {
+  const imageAttrs = props.editor.getAttributes(ExtensionImage.name);
+  if (imageAttrs.href) {
+    return imageAttrs;
+  }
+  return props.editor.getAttributes(ExtensionLink.name);
+};
+
+const updateImageLinkAttributes = (
+  attributes: Record<string, string | null>
+) => {
+  if (attributes.href && !isAllowedUri(attributes.href)) {
+    return;
+  }
+  const imagePosition = props.editor.state.selection.from;
+  props.editor
+    .chain()
+    .unsetLink()
+    .updateAttributes(ExtensionImage.name, attributes)
+    .setNodeSelection(imagePosition)
+    .run();
+};
 
 const href = computed({
-  get: () => {
-    return props.editor.getAttributes(Image.name).href;
-  },
+  get: () => getImageLinkAttributes().href,
   set: (href: string) => {
-    props.editor
-      .chain()
-      .updateAttributes(Image.name, { href: href })
-      .setNodeSelection(props.editor.state.selection.from)
-      .focus()
-      .run();
+    const currentAttributes = getImageLinkAttributes();
+    updateImageLinkAttributes({
+      href,
+      target: currentAttributes.href
+        ? currentAttributes.target || IMAGE_LINK_TARGET_SELF
+        : IMAGE_LINK_TARGET_BLANK,
+    });
+  },
+});
+
+const target = computed({
+  get() {
+    return getImageLinkAttributes().target === IMAGE_LINK_TARGET_BLANK;
+  },
+  set(value) {
+    updateImageLinkAttributes({
+      href: href.value,
+      target: value ? IMAGE_LINK_TARGET_BLANK : IMAGE_LINK_TARGET_SELF,
+    });
   },
 });
 </script>
 
 <template>
-  <input
-    v-model.lazy="href"
-    :placeholder="i18n.global.t('editor.common.placeholder.alt_href')"
-    class="bg-gray-50 rounded-md hover:bg-gray-100 block px-2 w-full py-1.5 text-sm text-gray-900 border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-  />
+  <div class="w-80">
+    <Input
+      v-if="visible?.({ editor: props.editor })"
+      v-model="href"
+      auto-focus
+      :placeholder="i18n.global.t('editor.common.placeholder.alt_href')"
+      :label="i18n.global.t('editor.extensions.image.href_input_label')"
+    />
+    <label class="mt-3 inline-flex items-center">
+      <input v-model="target" type="checkbox" />
+      <span class="ml-2 text-sm text-gray-500">
+        {{ i18n.global.t("editor.extensions.link.open_in_new_window") }}
+      </span>
+    </label>
+  </div>
 </template>

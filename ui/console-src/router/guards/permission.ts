@@ -1,22 +1,48 @@
-import { useRoleStore } from "@/stores/role";
-import { hasPermission } from "@/utils/permission";
-import type { Router } from "vue-router";
+import { stores, utils } from "@halo-dev/ui-shared";
+import type { RouteLocationNormalized, Router } from "vue-router";
+import { isConsoleAccessDisallowed } from "@/utils/role";
 
 export function setupPermissionGuard(router: Router) {
-  router.beforeEach((to, from, next) => {
-    const roleStore = useRoleStore();
-    const { uiPermissions } = roleStore.permissions;
-    const { meta } = to;
-    if (meta && meta.permissions) {
-      const flag = hasPermission(
-        Array.from(uiPermissions),
-        meta.permissions as string[],
-        true
-      );
-      if (!flag) {
-        next({ name: "Forbidden" });
-      }
+  router.beforeEach(async (to) => {
+    const currentUserStore = stores.currentUser();
+
+    if (isConsoleAccessDisallowed(currentUserStore.currentUser?.roles)) {
+      window.location.href = "/uc";
+      return false;
     }
-    next();
+
+    if (
+      !(await checkRoutePermissions(
+        to,
+        utils.permission.getUserPermissions() || []
+      ))
+    ) {
+      return { name: "Forbidden" };
+    }
   });
+}
+
+async function checkRoutePermissions(
+  to: RouteLocationNormalized,
+  uiPermissions: string[]
+): Promise<boolean> {
+  const { meta } = to;
+
+  if (!meta?.permissions) {
+    return true;
+  }
+
+  if (typeof meta.permissions === "function") {
+    try {
+      return await meta.permissions(uiPermissions);
+    } catch (e) {
+      console.error(
+        `Error checking permissions for route ${String(to.name)}:`,
+        e
+      );
+      return false;
+    }
+  }
+
+  return utils.permission.has(meta.permissions as string[]);
 }

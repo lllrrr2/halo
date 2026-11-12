@@ -1,9 +1,7 @@
 package run.halo.app.content;
 
 import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
-import static run.halo.app.extension.index.query.QueryFactory.and;
-import static run.halo.app.extension.index.query.QueryFactory.equal;
-import static run.halo.app.extension.index.query.QueryFactory.isNull;
+import static run.halo.app.extension.index.query.Queries.equal;
 
 import com.google.common.collect.Sets;
 import java.util.Collection;
@@ -22,7 +20,8 @@ import run.halo.app.extension.ExtensionClient;
 import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.MetadataUtil;
 import run.halo.app.extension.PageRequestImpl;
-import run.halo.app.extension.index.query.Query;
+import run.halo.app.extension.index.query.Condition;
+import run.halo.app.extension.index.query.Queries;
 import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.app.extension.router.selector.LabelSelector;
 import run.halo.app.infra.utils.JsonUtils;
@@ -34,13 +33,14 @@ import run.halo.app.infra.utils.JsonUtils;
  * @since 2.15.0
  */
 @Component
-public class CategoryPostCountUpdater
-    extends AbstractEventReconciler<CategoryPostCountUpdater.PostRelatedCategories> {
+public class CategoryPostCountUpdater extends AbstractEventReconciler<CategoryPostCountUpdater.PostRelatedCategories> {
 
+    protected final ExtensionClient client;
     private final CategoryPostCountService categoryPostCountService;
 
     public CategoryPostCountUpdater(ExtensionClient client) {
-        super(CategoryPostCountUpdater.class.getName(), client);
+        super(CategoryPostCountUpdater.class.getName());
+        this.client = client;
         this.categoryPostCountService = new CategoryPostCountService(client);
     }
 
@@ -91,37 +91,31 @@ public class CategoryPostCountUpdater
 
         private int countTotalPosts(String categoryName) {
             var postListOptions = new ListOptions();
-            postListOptions.setFieldSelector(FieldSelector.of(
-                basePostQuery(categoryName)
-            ));
+            postListOptions.setFieldSelector(FieldSelector.of(basePostQuery(categoryName)));
             return (int) client.listBy(Post.class, postListOptions, PageRequestImpl.ofSize(1))
-                .getTotal();
+                    .getTotal();
         }
 
         private int countVisiblePosts(String categoryName) {
             var postListOptions = new ListOptions();
-            var fieldQuery = and(basePostQuery(categoryName),
-                equal("spec.visible", Post.VisibleEnum.PUBLIC.name())
-            );
+            var fieldQuery = basePostQuery(categoryName).and(equal("spec.visible", Post.VisibleEnum.PUBLIC.name()));
             var labelSelector = LabelSelector.builder()
-                .eq(Post.PUBLISHED_LABEL, BooleanUtils.TRUE)
-                .build();
+                    .eq(Post.PUBLISHED_LABEL, BooleanUtils.TRUE)
+                    .build();
             postListOptions.setFieldSelector(FieldSelector.of(fieldQuery));
             postListOptions.setLabelSelector(labelSelector);
             return (int) client.listBy(Post.class, postListOptions, PageRequestImpl.ofSize(1))
-                .getTotal();
+                    .getTotal();
         }
 
-        private static Query basePostQuery(String categoryName) {
-            return and(isNull("metadata.deletionTimestamp"),
-                equal("spec.deleted", BooleanUtils.FALSE),
-                equal("spec.categories", categoryName)
-            );
+        private static Condition basePostQuery(String categoryName) {
+            return Queries.isNull("metadata.deletionTimestamp")
+                    .and(equal("spec.deleted", BooleanUtils.FALSE))
+                    .and(equal("spec.categories", categoryName));
         }
     }
 
-    public record PostRelatedCategories(String postName, Collection<String> categoryChanges) {
-    }
+    public record PostRelatedCategories(String postName, Collection<String> categoryChanges) {}
 
     @EventListener(PostUpdatedEvent.class)
     public void onPostUpdated(PostUpdatedEvent event) {
@@ -133,29 +127,26 @@ public class CategoryPostCountUpdater
     @EventListener(PostDeletedEvent.class)
     public void onPostDeleted(PostDeletedEvent event) {
         var postName = event.getName();
-        var categories = defaultIfNull(event.getPost().getSpec().getCategories(),
-            List.<String>of());
+        var categories = defaultIfNull(event.getPost().getSpec().getCategories(), List.<String>of());
         queue.addImmediately(new PostRelatedCategories(postName, categories));
     }
 
     private Set<String> calcCategoriesToUpdate(String postName) {
         return client.fetch(Post.class, postName)
-            .map(post -> {
-                var annotations = MetadataUtil.nullSafeAnnotations(post);
-                var oldCategories =
-                    Optional.ofNullable(annotations.get(Post.LAST_ASSOCIATED_CATEGORIES_ANNO))
-                        .filter(StringUtils::isNotBlank)
-                        .map(categoriesJson -> JsonUtils.jsonToObject(categoriesJson,
-                            String[].class))
-                        .orElse(new String[0]);
+                .map(post -> {
+                    var annotations = MetadataUtil.nullSafeAnnotations(post);
+                    var oldCategories = Optional.ofNullable(annotations.get(Post.LAST_ASSOCIATED_CATEGORIES_ANNO))
+                            .filter(StringUtils::isNotBlank)
+                            .map(categoriesJson -> JsonUtils.jsonToObject(categoriesJson, String[].class))
+                            .orElse(new String[0]);
 
-                Set<String> categoriesToUpdate = Sets.newHashSet(oldCategories);
-                var newCategories = post.getSpec().getCategories();
-                if (newCategories != null) {
-                    categoriesToUpdate.addAll(newCategories);
-                }
-                return categoriesToUpdate;
-            })
-            .orElse(Set.of());
+                    Set<String> categoriesToUpdate = Sets.newHashSet(oldCategories);
+                    var newCategories = post.getSpec().getCategories();
+                    if (newCategories != null) {
+                        categoriesToUpdate.addAll(newCategories);
+                    }
+                    return categoriesToUpdate;
+                })
+                .orElse(Set.of());
     }
 }

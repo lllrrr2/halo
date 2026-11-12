@@ -2,9 +2,12 @@ package run.halo.app.infra.utils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.function.UnaryOperator;
+import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.io.ClassPathResource;
@@ -12,16 +15,29 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.util.Assert;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.reactive.function.server.ServerRequest;
+import org.springframework.web.util.InvalidUrlException;
+import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriComponentsBuilder.ParserType;
+import org.springframework.web.util.UriUtils;
+import run.halo.app.theme.router.ModelConst;
 
 /**
+ * Halo utilities.
+ *
  * @author guqing
- * @date 2022-04-12
+ * @since 2.0.0
  */
 @Slf4j
+@UtilityClass
 public class HaloUtils {
 
+    /** Check if the request is an XMLHttpRequest. */
+    public static boolean isXhr(HttpHeaders headers) {
+        return headers.getOrEmpty("X-Requested-With").contains("XMLHttpRequest");
+    }
+
     /**
-     * <p>Read the file under the classpath as a string.</p>
+     * Read the file under the classpath as a string.
      *
      * @param location the file location relative to classpath
      * @return file content
@@ -32,8 +48,7 @@ public class HaloUtils {
             return StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalArgumentException(
-                String.format("Failed to read class path file as string from location [%s]",
-                    location), e);
+                    String.format("Failed to read class path file as string from location [%s]", location), e);
         }
     }
 
@@ -51,7 +66,7 @@ public class HaloUtils {
             // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Sec-CH-UA
             userAgent = httpHeaders.getFirst("Sec-CH-UA");
         }
-        return StringUtils.defaultString(userAgent, "unknown");
+        return StringUtils.defaultIfBlank(userAgent, "unknown");
     }
 
     public static String getDayText(Instant instant) {
@@ -69,5 +84,63 @@ public class HaloUtils {
     public static String getYearText(Instant instant) {
         Assert.notNull(instant, "Instant must not be null");
         return String.valueOf(instant.atZone(ZoneId.systemDefault()).getYear());
+    }
+
+    /**
+     * Mark the response as no cache.
+     *
+     * @return the server request operator
+     */
+    public static UnaryOperator<ServerRequest> noCache() {
+        return request -> {
+            request.exchange().getAttributes().put(ModelConst.NO_CACHE, true);
+            return request;
+        };
+    }
+
+    /**
+     * Safely convert string to URI. This method will assume the input string is already encoded. If failed, it will try
+     * to encode the string.
+     *
+     * @param uri the uri string
+     * @return the uri
+     */
+    public static URI safeToUri(String uri) {
+        // try to decode first
+        var decodedUri = UriUtils.decode(uri, StandardCharsets.UTF_8);
+        UriComponentsBuilder uriBuilder;
+        try {
+            uriBuilder = UriComponentsBuilder.fromUriString(decodedUri);
+        } catch (InvalidUrlException e) {
+            uriBuilder = UriComponentsBuilder.fromUriString(decodedUri, ParserType.WHAT_WG);
+        }
+        return uriBuilder.build(false).encode().toUri();
+    }
+
+    /**
+     * Safely convert an already URL-decoded string to URI without decoding it again. This method preserves the
+     * percent-encoded parts of the input, so a stored URI like {@code https://example.com/a%2Fb.png} keeps matching
+     * itself. Unicode hosts are still normalized to ASCII (punycode), and the input is encoded as a fallback if it
+     * cannot be parsed as an URI.
+     *
+     * @param uri the URL-decoded uri string
+     * @return the uri
+     */
+    public static URI safeToUriFromDecoded(String uri) {
+        var normalizedUri = normalizeHttpHost(uri);
+        try {
+            return URI.create(normalizedUri);
+        } catch (IllegalArgumentException e) {
+            return safeToUri(normalizedUri);
+        }
+    }
+
+    private static String normalizeHttpHost(String uri) {
+        if (!StringUtils.startsWithIgnoreCase(uri, "http://") && !StringUtils.startsWithIgnoreCase(uri, "https://")) {
+            // Only absolute http(s) URLs have an authority that may need IDN normalization.
+            return uri;
+        }
+        var normalizedUri = ExternalUrlUtils.toAscii(uri);
+        return normalizedUri != null ? normalizedUri : uri;
     }
 }

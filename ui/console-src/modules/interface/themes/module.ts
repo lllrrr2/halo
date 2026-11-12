@@ -1,8 +1,5 @@
-import { definePlugin } from "@halo-dev/console-shared";
-import ThemeLayout from "./layouts/ThemeLayout.vue";
-import ThemeDetail from "./ThemeDetail.vue";
-import ThemeSetting from "./ThemeSetting.vue";
 import { IconPalette } from "@halo-dev/components";
+import { definePlugin } from "@halo-dev/ui-shared";
 import { markRaw } from "vue";
 
 export default definePlugin({
@@ -11,7 +8,7 @@ export default definePlugin({
     {
       path: "/theme",
       name: "ThemeRoot",
-      component: ThemeLayout,
+      component: () => import("./layouts/ThemeLayout.vue"),
       meta: {
         title: "core.theme.title",
         searchable: true,
@@ -27,12 +24,12 @@ export default definePlugin({
         {
           path: "",
           name: "ThemeDetail",
-          component: ThemeDetail,
+          component: () => import("./ThemeDetail.vue"),
         },
         {
           path: "settings/:group",
           name: "ThemeSetting",
-          component: ThemeSetting,
+          component: () => import("./ThemeSetting.vue"),
           meta: {
             title: "core.theme.settings.title",
             permissions: ["system:themes:view"],

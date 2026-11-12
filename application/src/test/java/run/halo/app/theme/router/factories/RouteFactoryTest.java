@@ -28,26 +28,34 @@ class RouteFactoryTest extends RouteFactoryTestSuite {
         post.setArchivePageSize(2);
         post.setCategoryPageSize(3);
         post.setTagPageSize(null);
+        post.setAuthorPageSize(4);
         when(environmentFetcher.fetchPost()).thenReturn(Mono.just(post));
 
         TestRouteFactory routeFactory = new TestRouteFactory();
-        assertThat(
-            routeFactory.configuredPageSize(environmentFetcher, SystemSetting.Post::getTagPageSize)
-                .block()).isEqualTo(ModelConst.DEFAULT_PAGE_SIZE);
+        assertThat(routeFactory
+                        .configuredPageSize(environmentFetcher, SystemSetting.Post::getTagPageSize)
+                        .block())
+                .isEqualTo(ModelConst.DEFAULT_PAGE_SIZE);
 
-        assertThat(
-            routeFactory.configuredPageSize(environmentFetcher, SystemSetting.Post::getPostPageSize)
-                .block()).isEqualTo(post.getPostPageSize());
+        assertThat(routeFactory
+                        .configuredPageSize(environmentFetcher, SystemSetting.Post::getPostPageSize)
+                        .block())
+                .isEqualTo(post.getPostPageSize());
 
-        assertThat(
-            routeFactory.configuredPageSize(environmentFetcher,
-                SystemSetting.Post::getCategoryPageSize).block())
-            .isEqualTo(post.getCategoryPageSize());
+        assertThat(routeFactory
+                        .configuredPageSize(environmentFetcher, SystemSetting.Post::getCategoryPageSize)
+                        .block())
+                .isEqualTo(post.getCategoryPageSize());
 
-        assertThat(
-            routeFactory.configuredPageSize(environmentFetcher,
-                SystemSetting.Post::getArchivePageSize).block())
-            .isEqualTo(post.getArchivePageSize());
+        assertThat(routeFactory
+                        .configuredPageSize(environmentFetcher, SystemSetting.Post::getArchivePageSize)
+                        .block())
+                .isEqualTo(post.getArchivePageSize());
+
+        assertThat(routeFactory
+                        .configuredPageSize(environmentFetcher, SystemSetting.Post::getAuthorPageSize)
+                        .block())
+                .isEqualTo(post.getAuthorPageSize());
     }
 
     static class TestRouteFactory implements RouteFactory {

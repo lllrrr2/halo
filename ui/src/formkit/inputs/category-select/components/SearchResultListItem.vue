@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import {
   getCategoryPath,
-  type CategoryTree,
+  getCategoryFromNode,
+  type CategoryTreeNode,
 } from "@console/modules/contents/posts/categories/utils";
 import type { Category } from "@halo-dev/api-client";
 import { IconCheckboxCircle } from "@halo-dev/components";
@@ -14,17 +15,25 @@ const props = withDefaults(
   {}
 );
 
-const categoriesTree = inject<Ref<CategoryTree[]>>("categoriesTree", ref([]));
-const selectedCategory = inject<Ref<Category | CategoryTree | undefined>>(
+const categoriesTree = inject<Ref<CategoryTreeNode[]>>(
+  "categoriesTree",
+  ref([])
+);
+const selectedCategory = inject<Ref<Category | CategoryTreeNode | undefined>>(
   "selectedCategory",
   ref(undefined)
 );
+const selectedCategoryName = computed(() => {
+  return selectedCategory.value
+    ? getCategoryFromNode(selectedCategory.value).metadata.name
+    : undefined;
+});
 
 const isSelected =
-  inject<(category: Category | CategoryTree) => boolean>("isSelected");
+  inject<(category: Category | CategoryTreeNode) => boolean>("isSelected");
 
 const emit = defineEmits<{
-  (event: "select", category: CategoryTree | Category): void;
+  (event: "select", category: CategoryTreeNode | Category): void;
 }>();
 
 const label = computed(() => {
@@ -33,7 +42,7 @@ const label = computed(() => {
     props.category.metadata.name
   );
   return categories
-    ?.map((category: CategoryTree) => category.spec.displayName)
+    ?.map((category: CategoryTreeNode) => category.category.spec.displayName)
     .join(" / ");
 });
 </script>
@@ -43,8 +52,7 @@ const label = computed(() => {
     <div
       class="flex cursor-pointer items-center justify-between rounded p-2 hover:bg-gray-100"
       :class="{
-        'bg-gray-100':
-          selectedCategory?.metadata.name === category.metadata.name,
+        'bg-gray-100': selectedCategoryName === category.metadata.name,
       }"
       @click="emit('select', category)"
     >
@@ -53,7 +61,7 @@ const label = computed(() => {
         :class="{
           'text-gray-900':
             isSelected?.(category) &&
-            selectedCategory?.metadata.name === category.metadata.name,
+            selectedCategoryName === category.metadata.name,
         }"
       >
         {{ label }}

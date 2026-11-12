@@ -2,6 +2,7 @@ package run.halo.app.security;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,6 +15,7 @@ import run.halo.app.core.extension.RoleBinding.Subject;
 import run.halo.app.core.extension.User;
 import run.halo.app.core.extension.User.UserSpec;
 import run.halo.app.extension.Metadata;
+import run.halo.app.extension.MetadataUtil;
 import run.halo.app.extension.ReactiveExtensionClient;
 
 @Slf4j
@@ -27,21 +29,19 @@ public class DefaultSuperAdminInitializer implements SuperAdminInitializer {
     @Override
     public Mono<Void> initialize(InitializationParam param) {
         return client.fetch(User.class, param.getUsername())
-            .switchIfEmpty(Mono.defer(() -> client.create(
-                    createAdmin(param.getUsername(), param.getPassword(), param.getEmail())))
-                .flatMap(admin -> {
-                    var binding = bindAdminAndSuperRole(admin);
-                    return client.create(binding).thenReturn(admin);
-                })
-            )
-            .then();
+                .switchIfEmpty(Mono.defer(() ->
+                                client.create(createAdmin(param.getUsername(), param.getPassword(), param.getEmail())))
+                        .flatMap(admin -> {
+                            var binding = bindAdminAndSuperRole(admin);
+                            return client.create(binding).thenReturn(admin);
+                        }))
+                .then();
     }
 
     RoleBinding bindAdminAndSuperRole(User admin) {
         String adminUserName = admin.getMetadata().getName();
         var metadata = new Metadata();
-        String name =
-            String.join("-", adminUserName, SUPER_ROLE_NAME, "binding");
+        String name = String.join("-", adminUserName, SUPER_ROLE_NAME, "binding");
         metadata.setName(name);
         var roleRef = new RoleRef();
         roleRef.setName(SUPER_ROLE_NAME);
@@ -64,6 +64,7 @@ public class DefaultSuperAdminInitializer implements SuperAdminInitializer {
     User createAdmin(String username, String password, String email) {
         var metadata = new Metadata();
         metadata.setName(username);
+        metadata.setFinalizers(Set.of(MetadataUtil.SYSTEM_FINALIZER));
 
         var spec = new UserSpec();
         spec.setDisplayName("Administrator");

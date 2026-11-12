@@ -7,11 +7,13 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
@@ -24,6 +26,7 @@ import reactor.core.publisher.Mono;
 import run.halo.app.content.PostService;
 import run.halo.app.core.extension.content.Post;
 import run.halo.app.core.extension.content.SinglePage;
+import run.halo.app.core.user.service.RoleService;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.AnonymousUserConst;
@@ -40,52 +43,55 @@ import run.halo.app.theme.finders.vo.SinglePageVo;
  * @author guqing
  * @since 2.6.x
  */
-@ExtendWith(SpringExtension.class)
+@ExtendWith({SpringExtension.class, MockitoExtension.class})
 class PreviewRouterFunctionTest {
     @Mock
-    private ReactiveExtensionClient client;
+    ReactiveExtensionClient client;
 
     @Mock
-    private PostPublicQueryService postPublicQueryService;
+    PostPublicQueryService postPublicQueryService;
 
     @Mock
-    private ViewNameResolver viewNameResolver;
+    ViewNameResolver viewNameResolver;
 
     @Mock
-    private ViewResolver viewResolver;
+    PostViewNameResolver postViewNameResolver;
 
     @Mock
-    private PostService postService;
+    ViewResolver viewResolver;
 
     @Mock
-    private SinglePageConversionService singlePageConversionService;
+    PostService postService;
+
+    @Mock
+    RoleService roleService;
+
+    @Mock
+    SinglePageConversionService singlePageConversionService;
 
     @InjectMocks
-    private PreviewRouterFunction previewRouterFunction;
+    PreviewRouterFunction previewRouterFunction;
 
-    private WebTestClient webTestClient;
+    WebTestClient webTestClient;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         webTestClient = WebTestClient.bindToRouterFunction(previewRouterFunction.previewRouter())
-            .handlerStrategies(HandlerStrategies.builder()
-                .viewResolver(viewResolver)
-                .build())
-            .build();
-
-        when(viewResolver.resolveViewName(any(), any()))
-            .thenReturn(Mono.just(new EmptyView() {
-                @Override
-                public Mono<Void> render(Map<String, ?> model, MediaType contentType,
-                    ServerWebExchange exchange) {
-                    return super.render(model, contentType, exchange);
-                }
-            }));
+                .handlerStrategies(
+                        HandlerStrategies.builder().viewResolver(viewResolver).build())
+                .build();
     }
 
     @Test
     @WithMockUser(username = "testuser")
-    public void previewPost() {
+    void previewPost() {
+        when(viewResolver.resolveViewName(any(), any())).thenReturn(Mono.just(new EmptyView() {
+            @Override
+            public Mono<Void> render(Map<String, ?> model, MediaType contentType, ServerWebExchange exchange) {
+                return super.render(model, contentType, exchange);
+            }
+        }));
+
         Post post = new Post();
         post.setMetadata(new Metadata());
         post.getMetadata().setName("post1");
@@ -99,30 +105,73 @@ class PreviewRouterFunctionTest {
         PostVo postVo = PostVo.from(post);
         postVo.setContributors(contributorVos());
         when(postPublicQueryService.convertToVo(eq(post), eq(post.getSpec().getHeadSnapshot())))
-            .thenReturn(Mono.just(postVo));
+                .thenReturn(Mono.just(postVo));
 
-        when(viewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class),
-            eq("postTemplate"), eq("post"))).thenReturn(Mono.just("postView"));
+        when(postViewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class), eq(postVo)))
+                .thenReturn(Mono.just("postView"));
 
-        webTestClient.get().uri("/preview/posts/post1")
-            .exchange()
-            .expectStatus().isOk();
+        webTestClient
+                .get()
+                .uri("/preview/posts/post1")
+                .exchange()
+                .expectStatus()
+                .isOk();
 
         verify(viewResolver).resolveViewName(any(), any());
+        verify(postViewNameResolver).resolveViewNameOrDefault(any(ServerRequest.class), eq(postVo));
         verify(postPublicQueryService).convertToVo(eq(post), eq(post.getSpec().getHeadSnapshot()));
         verify(client).fetch(eq(Post.class), eq("post1"));
     }
 
     @Test
+    @WithMockUser(username = "admin", authorities = "ROLE_role-template-view-posts")
+    void previewPostWithViewPermission() {
+        when(viewResolver.resolveViewName(any(), any())).thenReturn(Mono.just(new EmptyView()));
+
+        Post post = new Post();
+        post.setMetadata(new Metadata());
+        post.getMetadata().setName("post1");
+        post.setSpec(new Post.PostSpec());
+        post.getSpec().setHeadSnapshot("snapshot1");
+        when(client.fetch(Post.class, "post1")).thenReturn(Mono.just(post));
+
+        PostVo postVo = PostVo.from(post);
+        postVo.setContributors(
+                List.of(ContributorVo.builder().name("other-user").build()));
+        when(postPublicQueryService.convertToVo(post, "snapshot1")).thenReturn(Mono.just(postVo));
+        when(roleService.contains(Set.of("role-template-view-posts"), Set.of("role-template-view-posts")))
+                .thenReturn(Mono.just(true));
+        when(postViewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class), eq(postVo)))
+                .thenReturn(Mono.just("postView"));
+
+        webTestClient
+                .get()
+                .uri("/preview/posts/post1")
+                .exchange()
+                .expectStatus()
+                .isOk();
+    }
+
+    @Test
     public void previewPostWhenUnAuthenticated() {
-        webTestClient.get().uri("/preview/posts/post1")
-            .exchange()
-            .expectStatus().isEqualTo(404);
+        webTestClient
+                .get()
+                .uri("/preview/posts/post1")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(404);
     }
 
     @Test
     @WithMockUser(username = "testuser")
     public void previewSinglePage() {
+        when(viewResolver.resolveViewName(any(), any())).thenReturn(Mono.just(new EmptyView() {
+            @Override
+            public Mono<Void> render(Map<String, ?> model, MediaType contentType, ServerWebExchange exchange) {
+                return super.render(model, contentType, exchange);
+            }
+        }));
+
         SinglePage singlePage = new SinglePage();
         singlePage.setMetadata(new Metadata());
         singlePage.getMetadata().setName("page1");
@@ -134,42 +183,75 @@ class PreviewRouterFunctionTest {
 
         SinglePageVo singlePageVo = SinglePageVo.from(singlePage);
         singlePageVo.setContributors(contributorVos());
-        when(singlePageConversionService.convertToVo(singlePage, "snapshot1"))
-            .thenReturn(Mono.just(singlePageVo));
+        when(singlePageConversionService.convertToVo(singlePage, "snapshot1")).thenReturn(Mono.just(singlePageVo));
 
-        when(viewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class),
-            eq("pageTemplate"), eq("page"))).thenReturn(Mono.just("pageView"));
+        when(viewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class), eq("pageTemplate"), eq("page")))
+                .thenReturn(Mono.just("pageView"));
 
-        webTestClient.get().uri("/preview/singlepages/page1")
-            .exchange()
-            .expectStatus().isOk();
+        webTestClient
+                .get()
+                .uri("/preview/singlepages/page1")
+                .exchange()
+                .expectStatus()
+                .isOk();
 
         verify(viewResolver).resolveViewName(any(), any());
         verify(client).fetch(eq(SinglePage.class), eq("page1"));
     }
 
     @Test
+    @WithMockUser(username = "admin", authorities = "ROLE_role-template-view-singlepages")
+    void previewSinglePageWithViewPermission() {
+        when(viewResolver.resolveViewName(any(), any())).thenReturn(Mono.just(new EmptyView()));
+
+        SinglePage singlePage = new SinglePage();
+        singlePage.setMetadata(new Metadata());
+        singlePage.getMetadata().setName("page1");
+        singlePage.setSpec(new SinglePage.SinglePageSpec());
+        singlePage.getSpec().setHeadSnapshot("snapshot1");
+        when(client.fetch(SinglePage.class, "page1")).thenReturn(Mono.just(singlePage));
+
+        SinglePageVo singlePageVo = SinglePageVo.from(singlePage);
+        singlePageVo.setContributors(
+                List.of(ContributorVo.builder().name("other-user").build()));
+        when(singlePageConversionService.convertToVo(singlePage, "snapshot1")).thenReturn(Mono.just(singlePageVo));
+        when(roleService.contains(Set.of("role-template-view-singlepages"), Set.of("role-template-view-singlepages")))
+                .thenReturn(Mono.just(true));
+        when(viewNameResolver.resolveViewNameOrDefault(any(ServerRequest.class), any(), eq("page")))
+                .thenReturn(Mono.just("pageView"));
+
+        webTestClient
+                .get()
+                .uri("/preview/singlepages/page1")
+                .exchange()
+                .expectStatus()
+                .isOk();
+    }
+
+    @Test
     public void previewSinglePageWhenUnAuthenticated() {
-        webTestClient.get().uri("/preview/singlepages/page1")
-            .exchange()
-            .expectStatus().isEqualTo(404);
+        webTestClient
+                .get()
+                .uri("/preview/singlepages/page1")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(404);
     }
 
     @Test
     @WithMockUser(username = AnonymousUserConst.PRINCIPAL)
     public void previewWithAnonymousUser() {
-        webTestClient.get().uri("/preview/singlepages/page1")
-            .exchange()
-            .expectStatus().isEqualTo(404);
+        webTestClient
+                .get()
+                .uri("/preview/singlepages/page1")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(404);
     }
 
     List<ContributorVo> contributorVos() {
-        ContributorVo contributorA = ContributorVo.builder()
-            .name("fake-user")
-            .build();
-        ContributorVo contributorB = ContributorVo.builder()
-            .name("testuser")
-            .build();
+        ContributorVo contributorA = ContributorVo.builder().name("fake-user").build();
+        ContributorVo contributorB = ContributorVo.builder().name("testuser").build();
         return List.of(contributorA, contributorB);
     }
 }

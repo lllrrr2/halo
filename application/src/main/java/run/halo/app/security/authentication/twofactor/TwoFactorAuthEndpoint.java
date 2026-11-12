@@ -1,21 +1,23 @@
 package run.halo.app.security.authentication.twofactor;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
 import static org.springdoc.core.fn.builders.apiresponse.Builder.responseBuilder;
 import static org.springdoc.core.fn.builders.requestbody.Builder.requestBodyBuilder;
 import static org.springdoc.webflux.core.fn.SpringdocRouteBuilder.route;
 import static org.springframework.web.reactive.function.server.RequestPredicates.path;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import lombok.Data;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.Validator;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -25,12 +27,14 @@ import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.User;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
-import run.halo.app.core.extension.service.UserService;
+import run.halo.app.core.user.service.UserService;
 import run.halo.app.extension.GroupVersion;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.ExternalUrlSupplier;
+import run.halo.app.infra.ValidationUtils;
 import run.halo.app.infra.exception.AccessDeniedException;
 import run.halo.app.infra.exception.RequestBodyValidationException;
+import run.halo.app.infra.exception.UnsatisfiedAttributeValueException;
 import run.halo.app.security.authentication.twofactor.totp.TotpAuthService;
 
 @Component
@@ -48,12 +52,13 @@ public class TwoFactorAuthEndpoint implements CustomEndpoint {
 
     private final ExternalUrlSupplier externalUrl;
 
-    public TwoFactorAuthEndpoint(ReactiveExtensionClient client,
-        UserService userService,
-        TotpAuthService totpAuthService,
-        Validator validator,
-        PasswordEncoder passwordEncoder,
-        ExternalUrlSupplier externalUrl) {
+    public TwoFactorAuthEndpoint(
+            ReactiveExtensionClient client,
+            UserService userService,
+            TotpAuthService totpAuthService,
+            Validator validator,
+            PasswordEncoder passwordEncoder,
+            ExternalUrlSupplier externalUrl) {
         this.client = client;
         this.userService = userService;
         this.totpAuthService = totpAuthService;
@@ -64,62 +69,83 @@ public class TwoFactorAuthEndpoint implements CustomEndpoint {
 
     @Override
     public RouterFunction<ServerResponse> endpoint() {
-        var tag = groupVersion() + "/Authentication/TwoFactor";
-        return route().nest(path("/authentications/two-factor"),
-            () -> route()
-                .GET("/settings", this::getTwoFactorSettings,
-                    builder -> builder.operationId("GetTwoFactorAuthenticationSettings")
-                        .tag(tag)
-                        .description("Get Two-factor authentication settings.")
-                        .response(responseBuilder().implementation(TwoFactorAuthSettings.class)))
-                .PUT("/settings/enabled", this::enableTwoFactor,
-                    builder -> builder.operationId("EnableTwoFactor")
-                        .tag(tag)
-                        .description("Enable Two-factor authentication")
-                        .requestBody(requestBodyBuilder().implementation(PasswordRequest.class))
-                        .response(responseBuilder().implementation(TwoFactorAuthSettings.class)))
-                .PUT("/settings/disabled", this::disableTwoFactor,
-                    builder -> builder.operationId("DisableTwoFactor")
-                        .tag(tag)
-                        .description("Disable Two-factor authentication")
-                        .requestBody(requestBodyBuilder().implementation(PasswordRequest.class))
-                        .response(responseBuilder().implementation(TwoFactorAuthSettings.class)))
-                .POST("/totp", this::configureTotp,
-                    builder -> builder.operationId("ConfigurerTotp")
-                        .tag(tag)
-                        .description("Configure a TOTP")
-                        .requestBody(requestBodyBuilder().implementation(TotpRequest.class))
-                        .response(responseBuilder().implementation(TwoFactorAuthSettings.class)))
-                .DELETE("/totp/-", this::deleteTotp,
-                    builder -> builder.operationId("DeleteTotp")
-                        .tag(tag)
-                        .requestBody(requestBodyBuilder().implementation(PasswordRequest.class))
-                        .response(responseBuilder().implementation(TwoFactorAuthSettings.class)))
-                .GET("/totp/auth-link", this::getTotpAuthLink,
-                    builder -> builder.operationId("GetTotpAuthLink")
-                        .tag(tag)
-                        .description("Get TOTP auth link, including secret")
-                        .response(responseBuilder().implementation(TotpAuthLinkResponse.class)))
-                .build(),
-            builder -> builder.description("Two-factor authentication endpoint(User-scoped)")
-        ).build();
+        var tag = "TwoFactorAuthV1alpha1Uc";
+        return route().nest(
+                        path("/authentications/two-factor"),
+                        () -> route().GET(
+                                        "/settings",
+                                        this::getTwoFactorSettings,
+                                        builder -> builder.operationId("GetTwoFactorAuthenticationSettings")
+                                                .tag(tag)
+                                                .description("Get Two-factor authentication settings.")
+                                                .response(
+                                                        responseBuilder().implementation(TwoFactorAuthSettings.class)))
+                                .PUT(
+                                        "/settings/enabled",
+                                        this::enableTwoFactor,
+                                        builder -> builder.operationId("EnableTwoFactor")
+                                                .tag(tag)
+                                                .description("Enable Two-factor authentication")
+                                                .requestBody(
+                                                        requestBodyBuilder().implementation(PasswordRequest.class))
+                                                .response(
+                                                        responseBuilder().implementation(TwoFactorAuthSettings.class)))
+                                .PUT(
+                                        "/settings/disabled",
+                                        this::disableTwoFactor,
+                                        builder -> builder.operationId("DisableTwoFactor")
+                                                .tag(tag)
+                                                .description("Disable Two-factor authentication")
+                                                .requestBody(
+                                                        requestBodyBuilder().implementation(PasswordRequest.class))
+                                                .response(
+                                                        responseBuilder().implementation(TwoFactorAuthSettings.class)))
+                                .POST(
+                                        "/totp",
+                                        this::configureTotp,
+                                        builder -> builder.operationId("ConfigurerTotp")
+                                                .tag(tag)
+                                                .description("Configure a TOTP")
+                                                .requestBody(
+                                                        requestBodyBuilder().implementation(TotpRequest.class))
+                                                .response(
+                                                        responseBuilder().implementation(TwoFactorAuthSettings.class)))
+                                .DELETE(
+                                        "/totp/-",
+                                        this::deleteTotp,
+                                        builder -> builder.operationId("DeleteTotp")
+                                                .tag(tag)
+                                                .description("Delete the current user's configured TOTP authenticator "
+                                                        + "after password verification.")
+                                                .requestBody(
+                                                        requestBodyBuilder().implementation(PasswordRequest.class))
+                                                .response(
+                                                        responseBuilder().implementation(TwoFactorAuthSettings.class)))
+                                .GET(
+                                        "/totp/auth-link",
+                                        this::getTotpAuthLink,
+                                        builder -> builder.operationId("GetTotpAuthLink")
+                                                .tag(tag)
+                                                .description("Get TOTP auth link, including secret")
+                                                .response(responseBuilder().implementation(TotpAuthLinkResponse.class)))
+                                .build())
+                .build();
     }
 
     private Mono<ServerResponse> deleteTotp(ServerRequest request) {
         var totpDeleteRequestMono = request.bodyToMono(PasswordRequest.class)
-            .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required")))
-            .doOnNext(
-                passwordRequest -> this.validateRequest(passwordRequest, "passwordRequest"));
+                .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required")))
+                .delayUntil(passwordRequest -> this.validateRequest(passwordRequest, "passwordRequest", request));
 
-        var twoFactorAuthSettings =
-            totpDeleteRequestMono.flatMap(passwordRequest -> getCurrentUser()
+        var twoFactorAuthSettings = totpDeleteRequestMono.flatMap(passwordRequest -> getCurrentUser()
                 .filter(user -> {
                     var rawPassword = passwordRequest.getPassword();
                     var encodedPassword = user.getSpec().getPassword();
                     return this.passwordEncoder.matches(rawPassword, encodedPassword);
                 })
-                .switchIfEmpty(
-                    Mono.error(() -> new ServerWebInputException("Invalid password")))
+                .switchIfEmpty(Mono.error(
+                        () -> new UnsatisfiedAttributeValueException("problemDetail.user.password.notMatch")))
+                .delayUntil(user -> validateTotpCode(user, passwordRequest.getTotpCode()))
                 .doOnNext(user -> {
                     var spec = user.getSpec();
                     spec.setTotpEncryptedSecret(null);
@@ -129,12 +155,17 @@ public class TwoFactorAuthEndpoint implements CustomEndpoint {
         return ServerResponse.ok().body(twoFactorAuthSettings, TwoFactorAuthSettings.class);
     }
 
+    /** Password verification payload for changing two-factor authentication settings. */
     @Data
     public static class PasswordRequest {
 
+        /** Current password of the authenticated user. */
+        @Schema(requiredMode = REQUIRED)
         @NotBlank
         private String password;
 
+        /** Current TOTP code, required when TOTP has already been configured. */
+        private String totpCode;
     }
 
     private Mono<ServerResponse> disableTwoFactor(ServerRequest request) {
@@ -147,129 +178,158 @@ public class TwoFactorAuthEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> toggleTwoFactor(ServerRequest request, boolean enabled) {
         return request.bodyToMono(PasswordRequest.class)
-            .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required")))
-            .doOnNext(passwordRequest -> this.validateRequest(passwordRequest, "passwordRequest"))
-            .flatMap(passwordRequest -> getCurrentUser()
-                .filter(user -> {
-                    var encodedPassword = user.getSpec().getPassword();
-                    var rawPassword = passwordRequest.getPassword();
-                    return passwordEncoder.matches(rawPassword, encodedPassword);
-                })
-                .switchIfEmpty(
-                    Mono.error(() -> new ServerWebInputException("Invalid password")))
-                .doOnNext(user -> user.getSpec().setTwoFactorAuthEnabled(enabled))
-                .flatMap(client::update)
-                .map(TwoFactorUtils::getTwoFactorAuthSettings))
-            .flatMap(twoFactorAuthSettings -> ServerResponse.ok().bodyValue(twoFactorAuthSettings));
+                .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required")))
+                .delayUntil(passwordRequest -> this.validateRequest(passwordRequest, "passwordRequest", request))
+                .flatMap(passwordRequest -> getCurrentUser()
+                        .filter(user -> {
+                            var encodedPassword = user.getSpec().getPassword();
+                            var rawPassword = passwordRequest.getPassword();
+                            return passwordEncoder.matches(rawPassword, encodedPassword);
+                        })
+                        .switchIfEmpty(Mono.error(
+                                () -> new UnsatisfiedAttributeValueException("problemDetail.user.password.notMatch")))
+                        .delayUntil(user -> validateTotpCode(user, passwordRequest.getTotpCode()))
+                        .doOnNext(user -> user.getSpec().setTwoFactorAuthEnabled(enabled))
+                        .flatMap(client::update)
+                        .map(TwoFactorUtils::getTwoFactorAuthSettings))
+                .flatMap(twoFactorAuthSettings -> ServerResponse.ok().bodyValue(twoFactorAuthSettings));
     }
 
     private Mono<ServerResponse> getTotpAuthLink(ServerRequest request) {
-        var authLinkResponse = getCurrentUser()
-            .map(user -> {
-                var username = user.getMetadata().getName();
-                var url = externalUrl.getURL(request.exchange().getRequest());
-                var authority = url.getAuthority();
-                var authKeyId = username + ":" + authority;
-                var rawSecret = totpAuthService.generateTotpSecret();
-                var authLink = UriComponentsBuilder.fromUriString("otpauth://totp")
+        var authLinkResponse = getCurrentUser().map(user -> {
+            var username = user.getMetadata().getName();
+            var url = externalUrl.getURL(request.exchange().getRequest());
+            var authority = url.getAuthority();
+            var authKeyId = username + ":" + authority;
+            var rawSecret = totpAuthService.generateTotpSecret();
+            var authLink = UriComponentsBuilder.fromUriString("otpauth://totp")
                     .path(authKeyId)
                     .queryParam("secret", rawSecret)
                     .queryParam("digits", 6)
-                    .build().toUri();
-                var authLinkResp = new TotpAuthLinkResponse();
-                authLinkResp.setAuthLink(authLink);
-                authLinkResp.setRawSecret(rawSecret);
-                return authLinkResp;
-            });
+                    .build()
+                    .toUri();
+            var authLinkResp = new TotpAuthLinkResponse();
+            authLinkResp.setAuthLink(authLink);
+            authLinkResp.setRawSecret(rawSecret);
+            return authLinkResp;
+        });
 
         return ServerResponse.ok().body(authLinkResponse, TotpAuthLinkResponse.class);
     }
 
+    /** TOTP provisioning data for configuring an authenticator app. */
     @Data
     public static class TotpAuthLinkResponse {
 
-        /**
-         * QR Code with base64 encoded.
-         */
+        /** otpauth URI that can be encoded as a QR code. */
+        @Schema(requiredMode = REQUIRED)
         private URI authLink;
 
+        /** Raw TOTP secret for manual authenticator setup. */
+        @Schema(requiredMode = REQUIRED)
         private String rawSecret;
     }
 
     private Mono<ServerResponse> configureTotp(ServerRequest request) {
         var totpRequestMono = request.bodyToMono(TotpRequest.class)
-            .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required.")))
-            .doOnNext(totpRequest -> this.validateRequest(totpRequest, "totp"));
+                .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Request body required.")))
+                .delayUntil(totpRequest -> this.validateRequest(totpRequest, "totp", request));
 
         var configuredUser = totpRequestMono.flatMap(totpRequest -> {
             // validate password
             return getCurrentUser()
-                .filter(user -> {
-                    var encodedPassword = user.getSpec().getPassword();
-                    var rawPassword = totpRequest.getPassword();
-                    return passwordEncoder.matches(rawPassword, encodedPassword);
-                })
-                .switchIfEmpty(Mono.error(() -> new ServerWebInputException("Invalid password")))
-                .doOnNext(user -> {
-                    // TimeBasedOneTimePasswordUtil.
-                    var rawSecret = totpRequest.getSecret();
-                    int code;
-                    try {
-                        code = Integer.parseInt(totpRequest.getCode());
-                    } catch (NumberFormatException e) {
-                        throw new ServerWebInputException("Invalid code");
-                    }
-                    var validated = totpAuthService.validateTotp(rawSecret, code);
-                    if (!validated) {
-                        throw new ServerWebInputException("Invalid secret or code");
-                    }
-                    var encryptedSecret = totpAuthService.encryptSecret(rawSecret);
-                    user.getSpec().setTotpEncryptedSecret(encryptedSecret);
-                })
-                .flatMap(client::update);
+                    .filter(user -> {
+                        var encodedPassword = user.getSpec().getPassword();
+                        var rawPassword = totpRequest.getPassword();
+                        return passwordEncoder.matches(rawPassword, encodedPassword);
+                    })
+                    .switchIfEmpty(Mono.error(
+                            () -> new UnsatisfiedAttributeValueException("problemDetail.user.password.notMatch")))
+                    .delayUntil(user -> validateTotpCode(user, totpRequest.getCurrentTotpCode()))
+                    .delayUntil(user -> {
+                        var rawSecret = totpRequest.getSecret();
+                        var encryptedSecret = totpAuthService.encryptSecret(rawSecret);
+                        return validateTotpCode(encryptedSecret, totpRequest.getCode())
+                                .then(Mono.fromRunnable(() -> user.getSpec().setTotpEncryptedSecret(encryptedSecret)));
+                    })
+                    .flatMap(client::update);
         });
 
-        var twoFactorAuthSettings =
-            configuredUser.map(TwoFactorUtils::getTwoFactorAuthSettings);
+        var twoFactorAuthSettings = configuredUser.map(TwoFactorUtils::getTwoFactorAuthSettings);
 
         return ServerResponse.ok().body(twoFactorAuthSettings, TwoFactorAuthSettings.class);
     }
 
-    private void validateRequest(Object target, String name) {
-        var errors = new BeanPropertyBindingResult(target, name);
-        validator.validate(target, errors);
-        if (errors.hasErrors()) {
-            throw new RequestBodyValidationException(errors);
+    private Mono<Void> validateRequest(Object target, String name, ServerRequest request) {
+        var bindingResult = ValidationUtils.validate(target, name, validator, request.exchange());
+        if (bindingResult.hasErrors()) {
+            return Mono.error(new RequestBodyValidationException(bindingResult));
         }
+        return Mono.empty();
     }
 
+    /** TOTP configuration payload. */
     @Data
     public static class TotpRequest {
 
+        /** Raw TOTP secret returned by the auth-link endpoint. */
+        @Schema(requiredMode = REQUIRED)
         @NotBlank
         private String secret;
 
+        /** TOTP code generated from the new secret. */
+        @Schema(requiredMode = REQUIRED)
         @NotNull
         private String code;
 
+        /** Current password of the authenticated user. */
+        @Schema(requiredMode = REQUIRED)
         @NotBlank
         private String password;
 
+        /** Current TOTP code, required when replacing an existing TOTP authenticator. */
+        private String currentTotpCode;
+    }
+
+    private Mono<Void> validateTotpCode(User user, String totpCode) {
+        var totpEncryptedSecret = user.getSpec().getTotpEncryptedSecret();
+        if (StringUtils.isBlank(totpEncryptedSecret)) {
+            // TOTP is not configured, no need to validate
+            return Mono.empty();
+        }
+        return validateTotpCode(totpEncryptedSecret, totpCode);
+    }
+
+    private Mono<Void> validateTotpCode(String totpEncryptedSecret, String totpCode) {
+        if (StringUtils.isBlank(totpCode)) {
+            return Mono.error(new UnsatisfiedAttributeValueException("problemDetail.user.twoFactor.code.required"));
+        }
+        int code;
+        try {
+            code = Integer.parseInt(totpCode);
+        } catch (NumberFormatException e) {
+            return Mono.error(new UnsatisfiedAttributeValueException("problemDetail.user.twoFactor.code.invalid"));
+        }
+        var rawSecret = totpAuthService.decryptSecret(totpEncryptedSecret);
+        if (!totpAuthService.validateTotp(rawSecret, code)) {
+            return Mono.error(new UnsatisfiedAttributeValueException("problemDetail.user.twoFactor.code.invalid"));
+        }
+        return Mono.empty();
     }
 
     private Mono<ServerResponse> getTwoFactorSettings(ServerRequest request) {
         return getCurrentUser()
-            .map(TwoFactorUtils::getTwoFactorAuthSettings)
-            .flatMap(settings -> ServerResponse.ok().bodyValue(settings));
+                .map(TwoFactorUtils::getTwoFactorAuthSettings)
+                .flatMap(settings -> ServerResponse.ok().bodyValue(settings));
     }
 
     private Mono<User> getCurrentUser() {
         return ReactiveSecurityContextHolder.getContext()
-            .map(SecurityContext::getAuthentication)
-            .filter(TwoFactorAuthEndpoint::isAuthenticatedUser)
-            .switchIfEmpty(Mono.error(AccessDeniedException::new))
-            .map(Authentication::getName)
-            .flatMap(userService::getUser);
+                .map(SecurityContext::getAuthentication)
+                .filter(TwoFactorAuthEndpoint::isAuthenticatedUser)
+                .switchIfEmpty(Mono.error(AccessDeniedException::new))
+                .map(Authentication::getName)
+                .flatMap(userService::getUser);
     }
 
     private static boolean isAuthenticatedUser(Authentication authentication) {
@@ -278,6 +338,6 @@ public class TwoFactorAuthEndpoint implements CustomEndpoint {
 
     @Override
     public GroupVersion groupVersion() {
-        return GroupVersion.parseAPIVersion("api.security.halo.run/v1alpha1");
+        return GroupVersion.parseAPIVersion("uc.api.security.halo.run/v1alpha1");
     }
 }

@@ -1,7 +1,6 @@
-import { definePlugin } from "@halo-dev/console-shared";
-import { IconTerminalBoxLine } from "@halo-dev/components";
 import BasicLayout from "@console/layouts/BasicLayout.vue";
-import Overview from "./Overview.vue";
+import { IconTerminalBoxLine } from "@halo-dev/components";
+import { definePlugin } from "@halo-dev/ui-shared";
 import { markRaw } from "vue";
 
 export default definePlugin({
@@ -26,7 +25,7 @@ export default definePlugin({
         {
           path: "",
           name: "Overview",
-          component: Overview,
+          component: () => import("./Overview.vue"),
         },
       ],
     },

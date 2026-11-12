@@ -1,6 +1,5 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
-import { useQuery } from "@tanstack/vue-query";
+import { ucApiClient } from "@halo-dev/api-client";
 import {
   IconAddCircle,
   IconBookRead,
@@ -8,16 +7,19 @@ import {
   VButton,
   VCard,
   VEmpty,
+  VEntityContainer,
+  VFilterDropdown,
+  VFilterDropdownGroup,
   VLoading,
   VPageHeader,
   VPagination,
   VSpace,
 } from "@halo-dev/components";
-import PostListItem from "./components/PostListItem.vue";
+import { useQuery } from "@tanstack/vue-query";
 import { useRouteQuery } from "@vueuse/router";
-import { computed } from "vue";
 import { watch } from "vue";
 import { postLabels } from "@/constants/labels";
+import PostListItem from "./components/PostListItem.vue";
 
 const page = useRouteQuery<number>("page", 1, {
   transform: Number,
@@ -30,14 +32,6 @@ const keyword = useRouteQuery<string>("keyword", "");
 const selectedPublishPhase = useRouteQuery<
   "DRAFT" | "PENDING_APPROVAL" | "PUBLISHED" | "FAILED" | undefined
 >("status");
-
-function handleClearFilters() {
-  selectedPublishPhase.value = undefined;
-}
-
-const hasFilters = computed(() => {
-  return selectedPublishPhase.value !== undefined;
-});
 
 watch(
   () => [selectedPublishPhase.value, keyword.value],
@@ -55,7 +49,7 @@ const {
   queryKey: ["my-posts", page, size, keyword, selectedPublishPhase],
   queryFn: async () => {
     const labelSelector: string[] = ["content.halo.run/deleted=false"];
-    const { data } = await apiClient.uc.post.listMyPosts({
+    const { data } = await ucApiClient.content.post.listMyPosts({
       labelSelector,
       page: page.value,
       size: size.value,
@@ -69,16 +63,34 @@ const {
     size.value = data.size;
   },
   refetchInterval: (data) => {
-    const hasAbnormalPost = data?.items.some((post) => {
-      const { spec, metadata, status } = post.post;
+    const hasDeletingPosts = data?.items.some((post) => post.post.spec.deleted);
+
+    if (hasDeletingPosts) {
+      return 1000;
+    }
+
+    const hasPublishingPost = data?.items.some((post) => {
+      const { spec, metadata } = post.post;
       return (
-        spec.deleted ||
-        metadata.labels?.[postLabels.PUBLISHED] !== spec.publish + "" ||
-        (spec.releaseSnapshot === spec.headSnapshot && status?.inProgress)
+        metadata.labels?.[postLabels.PUBLISHED] !== spec.publish + "" &&
+        metadata.labels?.[postLabels.SCHEDULING_PUBLISH] !== "true"
       );
     });
 
-    return hasAbnormalPost ? 1000 : false;
+    if (hasPublishingPost) {
+      return 1000;
+    }
+
+    const hasCancelingPublishPost = data?.items.some((post) => {
+      const { spec, metadata } = post.post;
+      return (
+        !spec.publish &&
+        (metadata.labels?.[postLabels.PUBLISHED] === "true" ||
+          metadata.labels?.[postLabels.SCHEDULING_PUBLISH] === "true")
+      );
+    });
+
+    return hasCancelingPublishPost ? 1000 : false;
   },
 });
 </script>
@@ -86,12 +98,12 @@ const {
 <template>
   <VPageHeader :title="$t('core.uc_post.title')">
     <template #icon>
-      <IconBookRead class="mr-2 self-center" />
+      <IconBookRead />
     </template>
     <template #actions>
       <VButton :route="{ name: 'PostEditor' }" type="secondary">
         <template #icon>
-          <IconAddCircle class="h-full w-full" />
+          <IconAddCircle />
         </template>
         {{ $t("core.common.buttons.new") }}
       </VButton>
@@ -108,38 +120,37 @@ const {
             <SearchInput v-model="keyword" />
 
             <VSpace spacing="lg" class="flex-wrap">
-              <FilterCleanButton
-                v-if="hasFilters"
-                @click="handleClearFilters"
-              />
-              <FilterDropdown
-                v-model="selectedPublishPhase"
-                :label="$t('core.common.filters.labels.status')"
-                :items="[
-                  {
-                    label: $t('core.common.filters.item_labels.all'),
-                    value: undefined,
-                  },
-                  {
-                    label: $t('core.post.filters.status.items.published'),
-                    value: 'PUBLISHED',
-                  },
-                  {
-                    label: $t('core.post.filters.status.items.draft'),
-                    value: 'DRAFT',
-                  },
-                ]"
-              />
-              <div
+              <VFilterDropdownGroup
+                :clear-label="$t('core.common.buttons.reset')"
+              >
+                <VFilterDropdown
+                  v-model="selectedPublishPhase"
+                  :label="$t('core.common.filters.labels.status')"
+                  show-clear-option
+                  :clear-label="$t('core.common.filters.item_labels.all')"
+                  :options="[
+                    {
+                      label: $t('core.post.filters.status.items.published'),
+                      value: 'PUBLISHED',
+                    },
+                    {
+                      label: $t('core.post.filters.status.items.draft'),
+                      value: 'DRAFT',
+                    },
+                  ]"
+                />
+              </VFilterDropdownGroup>
+              <button
+                v-tooltip="$t('core.common.buttons.refresh')"
+                type="button"
                 class="group cursor-pointer rounded p-1 hover:bg-gray-200"
                 @click="refetch()"
               >
                 <IconRefreshLine
-                  v-tooltip="$t('core.common.buttons.refresh')"
                   :class="{ 'animate-spin text-gray-900': isFetching }"
                   class="h-4 w-4 text-gray-600 group-hover:text-gray-900"
                 />
-              </div>
+              </button>
             </VSpace>
           </div>
         </div>
@@ -158,10 +169,10 @@ const {
               <VButton
                 v-permission="['system:posts:manage']"
                 :route="{ name: 'PostEditor' }"
-                type="primary"
+                type="secondary"
               >
                 <template #icon>
-                  <IconAddCircle class="h-full w-full" />
+                  <IconAddCircle />
                 </template>
                 {{ $t("core.common.buttons.new") }}
               </VButton>
@@ -170,14 +181,13 @@ const {
         </VEmpty>
       </Transition>
       <Transition v-else appear name="fade">
-        <ul
-          class="box-border h-full w-full divide-y divide-gray-100"
-          role="list"
-        >
-          <li v-for="post in posts.items" :key="post.post.metadata.name">
-            <PostListItem :post="post" />
-          </li>
-        </ul>
+        <VEntityContainer>
+          <PostListItem
+            v-for="post in posts.items"
+            :key="post.post.metadata.name"
+            :post="post"
+          />
+        </VEntityContainer>
       </Transition>
 
       <template #footer>

@@ -1,101 +1,70 @@
-import { type Editor } from "@/tiptap/vue-3";
-import TiptapTextAlign from "@tiptap/extension-text-align";
-import type { TextAlignOptions } from "@tiptap/extension-text-align";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import MdiFormatAlignLeft from "~icons/mdi/format-align-left";
-import MdiFormatAlignCenter from "~icons/mdi/format-align-center";
-import MdiFormatAlignRight from "~icons/mdi/format-align-right";
-import MdiFormatAlignJustify from "~icons/mdi/format-align-justify";
-import { markRaw } from "vue";
+import TiptapTextAlign, {
+  type TextAlignOptions,
+} from "@tiptap/extension-text-align";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
 import type { ExtensionOptions } from "@/types";
-import ToolbarSubItem from "@/components/toolbar/ToolbarSubItem.vue";
 
-const iconComponent = {
-  left: MdiFormatAlignLeft,
-  center: MdiFormatAlignCenter,
-  right: MdiFormatAlignRight,
-  justify: MdiFormatAlignJustify,
-};
+export type ExtensionTextAlignOptions = ExtensionOptions &
+  Partial<TextAlignOptions>;
 
-const getIcon = (editor: Editor) => {
-  let icon = MdiFormatAlignLeft;
-  Object.entries(iconComponent).forEach(([key, value]) => {
-    if (editor.isActive({ textAlign: key })) {
-      icon = value;
-      return;
-    }
-  });
-  return icon;
-};
+export const ExtensionTextAlign =
+  TiptapTextAlign.extend<ExtensionTextAlignOptions>({
+    addKeyboardShortcuts() {
+      return defineHaloKeyboardShortcuts(this, [
+        {
+          id: "editor.format.alignLeft",
+          keys: ["Mod-Shift-l"],
+          label: () => i18n.global.t("editor.common.align_left"),
+          category: "formatting",
+          priority: 80,
+          command: () => this.editor.commands.setTextAlign("left"),
+        },
+        {
+          id: "editor.format.alignCenter",
+          keys: ["Mod-Shift-c", "Mod-Shift-e"],
+          label: () => i18n.global.t("editor.common.align_center"),
+          category: "formatting",
+          priority: 90,
+          command: () => this.editor.commands.setTextAlign("center"),
+        },
+        {
+          id: "editor.format.alignRight",
+          keys: ["Mod-Shift-r"],
+          label: () => i18n.global.t("editor.common.align_right"),
+          category: "formatting",
+          priority: 100,
+          command: () => this.editor.commands.setTextAlign("right"),
+        },
+        {
+          id: "editor.format.alignJustify",
+          keys: ["Mod-Shift-j"],
+          label: () => i18n.global.t("editor.common.align_justify"),
+          category: "formatting",
+          priority: 110,
+          command: () => this.editor.commands.setTextAlign("justify"),
+        },
+      ]);
+    },
 
-const TextAlign = TiptapTextAlign.extend<ExtensionOptions & TextAlignOptions>({
-  addOptions() {
-    return {
-      ...this.parent?.(),
-      getToolbarItems({ editor }: { editor: Editor }) {
-        return {
-          priority: 180,
-          component: markRaw(ToolbarItem),
-          props: {
-            editor,
-            isActive: false,
-            icon: markRaw(getIcon(editor)),
-            title: i18n.global.t("editor.common.align_method"),
+    addHaloEditorMetadata() {
+      return {
+        contributions: (this.options.types ?? []).map((name) => ({
+          targets: [{ kind: "node" as const, name }],
+          metadata: {
+            ai: {
+              attributeGuidance: {
+                textAlign: {
+                  description: "Horizontal alignment of text in this block.",
+                  allowedValues: this.options.alignments,
+                  omitWhen: ["The editor default alignment is appropriate."],
+                },
+              },
+            },
           },
-          children: [
-            {
-              priority: 0,
-              component: markRaw(ToolbarSubItem),
-              props: {
-                editor,
-                isActive: editor.isActive({ textAlign: "left" }),
-                icon: markRaw(MdiFormatAlignLeft),
-                title: i18n.global.t("editor.common.align_left"),
-                action: () => editor.chain().focus().setTextAlign("left").run(),
-              },
-            },
-            {
-              priority: 10,
-              component: markRaw(ToolbarSubItem),
-              props: {
-                editor,
-                isActive: editor.isActive({ textAlign: "center" }),
-                icon: markRaw(MdiFormatAlignCenter),
-                title: i18n.global.t("editor.common.align_center"),
-                action: () =>
-                  editor.chain().focus().setTextAlign("center").run(),
-              },
-            },
-            {
-              priority: 20,
-              component: markRaw(ToolbarSubItem),
-              props: {
-                editor,
-                isActive: editor.isActive({ textAlign: "right" }),
-                icon: markRaw(MdiFormatAlignRight),
-                title: i18n.global.t("editor.common.align_right"),
-                action: () =>
-                  editor.chain().focus().setTextAlign("right").run(),
-              },
-            },
-            {
-              priority: 30,
-              component: markRaw(ToolbarSubItem),
-              props: {
-                editor,
-                isActive: editor.isActive({ textAlign: "justify" }),
-                icon: markRaw(MdiFormatAlignJustify),
-                title: i18n.global.t("editor.common.align_justify"),
-                action: () =>
-                  editor.chain().focus().setTextAlign("justify").run(),
-              },
-            },
-          ],
-        };
-      },
-    };
-  },
-});
-
-export default TextAlign;
+        })),
+      };
+    },
+  }).configure({
+    types: ["heading", "paragraph"],
+  });

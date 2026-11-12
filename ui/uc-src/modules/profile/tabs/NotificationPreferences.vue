@@ -1,36 +1,34 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import type {
-  DetailedUser,
-  ReasonTypeNotifierRequest,
-} from "@halo-dev/api-client";
+import type { ReasonTypeNotifierRequest } from "@halo-dev/api-client";
+import { ucApiClient } from "@halo-dev/api-client";
 import { VLoading, VSwitch } from "@halo-dev/components";
+import { stores } from "@halo-dev/ui-shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { cloneDeep } from "es-toolkit";
+import { storeToRefs } from "pinia";
 import { computed } from "vue";
-import { cloneDeep } from "lodash-es";
-import HasPermission from "@/components/permission/HasPermission.vue";
 
-const props = withDefaults(defineProps<{ user?: DetailedUser }>(), {
-  user: undefined,
-});
+const { currentUser } = storeToRefs(stores.currentUser());
 
 const queryClient = useQueryClient();
 
 const { data, isLoading } = useQuery({
   queryKey: ["notification-preferences"],
   queryFn: async () => {
-    if (!props.user) {
+    if (!currentUser.value) {
       return null;
     }
 
     const { data } =
-      await apiClient.notification.listUserNotificationPreferences({
-        username: props.user?.user.metadata.name,
-      });
+      await ucApiClient.notification.notification.listUserNotificationPreferences(
+        {
+          username: currentUser.value?.user.metadata.name,
+        }
+      );
 
     return data;
   },
-  enabled: computed(() => !!props.user),
+  enabled: computed(() => !!currentUser.value),
 });
 
 const {
@@ -50,7 +48,7 @@ const {
   }) => {
     const preferences = cloneDeep(data.value);
 
-    if (!props.user || !preferences) {
+    if (!currentUser.value || !preferences) {
       return;
     }
 
@@ -79,12 +77,14 @@ const {
       })
       .filter(Boolean) as Array<ReasonTypeNotifierRequest>;
 
-    return await apiClient.notification.saveUserNotificationPreferences({
-      username: props.user.user.metadata.name,
-      reasonTypeNotifierCollectionRequest: {
-        reasonTypeNotifiers,
-      },
-    });
+    return await ucApiClient.notification.notification.saveUserNotificationPreferences(
+      {
+        username: currentUser.value.user.metadata.name,
+        reasonTypeNotifierCollectionRequest: {
+          reasonTypeNotifiers,
+        },
+      }
+    );
   },
   onSuccess() {
     queryClient.invalidateQueries({ queryKey: ["notification-preferences"] });

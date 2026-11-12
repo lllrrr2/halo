@@ -1,6 +1,5 @@
 package run.halo.app.content.comment;
 
-import org.springframework.lang.NonNull;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.content.Comment;
 import run.halo.app.extension.ListResult;
@@ -18,5 +17,7 @@ public interface CommentService {
 
     Mono<Comment> create(Comment comment);
 
-    Mono<Void> removeBySubject(@NonNull Ref subjectRef);
+    Mono<Comment> updateContent(String name, CommentContentRequest request);
+
+    Mono<Void> removeBySubject(Ref subjectRef);
 }

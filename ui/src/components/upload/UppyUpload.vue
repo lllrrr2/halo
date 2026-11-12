@@ -1,23 +1,32 @@
 <script lang="ts" setup>
-import { Dashboard } from "@uppy/vue";
-import "@uppy/core/dist/style.css";
-import "@uppy/dashboard/dist/style.css";
+import { Toast } from "@halo-dev/components";
 import type { Restrictions } from "@uppy/core";
-import Uppy, { type SuccessResponse } from "@uppy/core";
-import XHRUpload from "@uppy/xhr-upload";
+import Uppy from "@uppy/core";
+import "@uppy/core/css/style.css";
+import "@uppy/dashboard/css/style.css";
 import ImageEditor from "@uppy/image-editor";
-import "@uppy/image-editor/dist/style.min.css";
+import "@uppy/image-editor/css/style.min.css";
+import en_US from "@uppy/locales/lib/en_US";
+import es_ES from "@uppy/locales/lib/es_ES";
 import zh_CN from "@uppy/locales/lib/zh_CN";
 import zh_TW from "@uppy/locales/lib/zh_TW";
-import en_US from "@uppy/locales/lib/en_US";
-import { computed, onUnmounted } from "vue";
-import { Toast } from "@halo-dev/components";
-import type { ProblemDetail } from "@/utils/api-client";
+import Dashboard from "@uppy/vue/dashboard";
+import XHRUpload from "@uppy/xhr-upload";
+import objectHash from "object-hash";
+import { computed, h, markRaw, onUnmounted, watch } from "vue";
 import { i18n } from "@/locales";
+import type { ProblemDetail } from "@/setup/setupApiClient";
+import { createHTMLContentModal } from "@/utils/modal";
+import type {
+  UppyUploadErrorResponse,
+  UppyUploadFile,
+  UppyUploadRestrictions,
+  UppyUploadSuccessResponse,
+} from "./types";
 
 const props = withDefaults(
   defineProps<{
-    restrictions?: Restrictions;
+    restrictions?: UppyUploadRestrictions;
     meta?: Record<string, unknown>;
     autoProceed?: boolean;
     allowedMetaFields?: string[];
@@ -29,6 +38,7 @@ const props = withDefaults(
     width?: string;
     height?: string;
     doneButtonHandler?: () => void;
+    allowFileNameEditing?: boolean;
   }>(),
   {
     restrictions: undefined,
@@ -42,31 +52,75 @@ const props = withDefaults(
     width: "750px",
     height: "550px",
     doneButtonHandler: undefined,
+    allowFileNameEditing: false,
   }
 );
 
 const emit = defineEmits<{
-  (event: "uploaded", response: SuccessResponse): void;
-  (event: "error", file, response): void;
+  (event: "uploaded", response: UppyUploadSuccessResponse): void;
+  (
+    event: "error",
+    file: UppyUploadFile | undefined,
+    response: UppyUploadErrorResponse | undefined
+  ): void;
 }>();
 
 const locales = {
   en: en_US,
+  es: es_ES,
   zh: zh_CN,
   "en-US": en_US,
   "zh-CN": zh_CN,
   "zh-TW": zh_TW,
 };
 
-const uppy = computed(() => {
-  return new Uppy({
-    locale: locales[i18n.global.locale.value] || locales["zh-CN"],
+function getUppyLocale(locale: string) {
+  return locales[locale] || locales[locale.split("-")[0]] || locales.en;
+}
+
+const defaultRestrictions: Restrictions = {
+  maxFileSize: null,
+  minFileSize: null,
+  maxTotalFileSize: null,
+  maxNumberOfFiles: null,
+  minNumberOfFiles: null,
+  allowedFileTypes: null,
+  requiredMetaFields: [],
+};
+
+function getRestrictions() {
+  if (!props.allowFileNameEditing) {
+    return props.restrictions;
+  }
+
+  return {
+    ...props.restrictions,
+    requiredMetaFields: [
+      ...new Set([...(props.restrictions?.requiredMetaFields || []), "name"]),
+    ],
+  };
+}
+
+const fileNameMetaFields = computed(() =>
+  props.allowFileNameEditing
+    ? [
+        {
+          id: "name",
+          name: i18n.global.t("core.components.uppy_upload.fields.file_name"),
+        },
+      ]
+    : []
+);
+
+const uppy = markRaw(
+  new Uppy<Record<string, unknown>, Record<string, unknown>>({
+    locale: getUppyLocale(i18n.global.locale.value),
     meta: props.meta,
-    restrictions: props.restrictions,
+    restrictions: getRestrictions(),
     autoProceed: props.autoProceed,
   })
     .use(XHRUpload, {
-      endpoint: `${import.meta.env.VITE_API_URL}${props.endpoint}`,
+      endpoint: `${props.endpoint}`,
       allowedMetaFields: props.allowedMetaFields,
       withCredentials: true,
       formData: true,
@@ -74,63 +128,210 @@ const uppy = computed(() => {
       method: props.method,
       limit: 5,
       timeout: 0,
-      getResponseError: (responseText: string, response: unknown) => {
+      // Uppy 3's XHRUpload failed after the first request. Uppy 5 retries
+      // failed requests by default, so keep the existing upload behavior.
+      shouldRetry: () => false,
+      getResponseData: async (response) => {
         try {
-          const response = JSON.parse(responseText);
-          if (typeof response === "object" && response && response) {
-            const { title, detail } = (response || {}) as ProblemDetail;
-            const message = [title, detail].filter(Boolean).join(": ");
-
-            if (message) {
-              Toast.error(message, { duration: 5000 });
-
-              return new Error(message);
-            }
-          }
-        } catch (e) {
-          const responseBody = response as XMLHttpRequest;
-          const { status, statusText } = responseBody;
-          const defaultMessage = [status, statusText].join(": ");
-          Toast.error(defaultMessage, { duration: 5000 });
-          return new Error(defaultMessage);
+          return JSON.parse(response.responseText);
+        } catch (_) {
+          // Uppy 3 accepted empty and non-JSON successful responses.
+          return {};
         }
-        return new Error("Internal Server Error");
+      },
+      onAfterResponse: async (response) => {
+        if (response.status < 200 || response.status >= 300) {
+          throw getUploadError(response);
+        }
       },
     })
-    .use(ImageEditor, {
-      locale: {
-        strings: {
-          revert: i18n.global.t("core.components.uppy.image_editor.revert"),
-          rotate: i18n.global.t("core.components.uppy.image_editor.rotate"),
-          zoomIn: i18n.global.t("core.components.uppy.image_editor.zoom_in"),
-          zoomOut: i18n.global.t("core.components.uppy.image_editor.zoom_out"),
-          flipHorizontal: i18n.global.t(
-            "core.components.uppy.image_editor.flip_horizontal"
-          ),
-          aspectRatioSquare: i18n.global.t(
-            "core.components.uppy.image_editor.aspect_ratio_square"
-          ),
-          aspectRatioLandscape: i18n.global.t(
-            "core.components.uppy.image_editor.aspect_ratio_landscape"
-          ),
-          aspectRatioPortrait: i18n.global.t(
-            "core.components.uppy.image_editor.aspect_ratio_portrait"
-          ),
-        },
-      },
-    });
-});
+    .use(ImageEditor)
+);
 
-uppy.value.on("upload-success", (_, response: SuccessResponse) => {
+function getErrorResponse(
+  response: XMLHttpRequest | undefined
+): UppyUploadErrorResponse | undefined {
+  if (!response || response.status === 0) {
+    return undefined;
+  }
+
+  let body: unknown = {};
+
+  try {
+    body = JSON.parse(response.responseText);
+  } catch (_) {
+    // Keep the Uppy 3 error event contract, which used an empty object when
+    // the response body was not JSON.
+  }
+
+  return {
+    status: response.status,
+    body,
+  };
+}
+
+function getUploadError(response: XMLHttpRequest) {
+  try {
+    const body = JSON.parse(response.responseText);
+    if (typeof body === "object" && body) {
+      const { title, detail } = body as ProblemDetail;
+      const message = [title, detail].filter(Boolean).join(": ");
+
+      if (message) {
+        return new Error(message);
+      }
+    }
+    return new Error("Internal Server Error");
+  } catch (_) {
+    return new Error([response.status, response.statusText].join(": "));
+  }
+}
+
+function showUploadError(response: XMLHttpRequest | undefined) {
+  if (!response || response.status === 0) {
+    return;
+  }
+
+  try {
+    const body = JSON.parse(response.responseText);
+    if (typeof body === "object" && body) {
+      const { title, detail } = body as ProblemDetail;
+      const message = [title, detail].filter(Boolean).join(": ");
+
+      if (message) {
+        Toast.error(message, { duration: 5000 });
+      }
+    }
+  } catch (_) {
+    const { status, statusText } = response;
+    const defaultMessage = [status, statusText].join(": ");
+
+    // Catch error requests where the response is text/html,
+    // which usually comes from a reverse proxy or WAF.
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(response.response, "text/html");
+
+    if (Array.from(doc.body.childNodes).some((node) => node.nodeType === 1)) {
+      createHTMLContentModal({
+        uniqueId: objectHash(response.response || ""),
+        title: response.status.toString(),
+        width: 700,
+        height: "calc(100vh - 20px)",
+        centered: true,
+        content: h("iframe", {
+          srcdoc: response.response,
+          sandbox: "",
+          referrerpolicy: "no-referrer",
+          loading: "lazy",
+          style: {
+            width: "100%",
+            height: "100%",
+          },
+        }),
+      });
+      return;
+    }
+
+    Toast.error(defaultMessage, { duration: 5000 });
+  }
+}
+
+const handleUploadSuccess = (
+  _: UppyUploadFile | undefined,
+  response: UppyUploadSuccessResponse
+) => {
   emit("uploaded", response);
-});
+};
 
-uppy.value.on("upload-error", (file, _, response) => {
-  emit("error", file, response);
-});
+const handleUploadError = (
+  file: UppyUploadFile | undefined,
+  _: unknown,
+  response: unknown
+) => {
+  const xhr = response as XMLHttpRequest | undefined;
+  showUploadError(xhr);
+  emit("error", file, getErrorResponse(xhr));
+};
+
+uppy.on("upload-success", handleUploadSuccess);
+uppy.on("upload-error", handleUploadError);
+
+watch(
+  [
+    () => props.meta,
+    () => props.restrictions,
+    () => props.autoProceed,
+    () => props.endpoint,
+    () => props.allowedMetaFields,
+    () => props.name,
+    () => props.method,
+    () => props.allowFileNameEditing,
+  ],
+  () => {
+    // The previous computed Uppy instance discarded queued files whenever
+    // upload-target options changed. Keep that behavior without remounting the
+    // Dashboard, otherwise a failed file could be retried to a new target.
+    uppy.cancelAll();
+    uppy.setOptions({
+      meta: props.meta,
+      restrictions: {
+        ...defaultRestrictions,
+        ...getRestrictions(),
+      },
+      autoProceed: props.autoProceed,
+    });
+    // Uppy merges metadata by default, so replace it explicitly to avoid
+    // sending keys removed by the caller.
+    uppy.setState({ meta: props.meta || {} });
+    uppy.getPlugin("XHRUpload")?.setOptions({
+      endpoint: props.endpoint,
+      allowedMetaFields: props.allowedMetaFields,
+      fieldName: props.name,
+      method: props.method,
+    });
+  },
+  { deep: true }
+);
+
+watch(
+  () => i18n.global.locale.value,
+  (locale) => {
+    uppy.setOptions({ locale: getUppyLocale(locale) });
+  }
+);
+
+watch(
+  fileNameMetaFields,
+  (metaFields) => {
+    uppy.getPlugin("Dashboard")?.setOptions({ metaFields });
+  },
+  { flush: "post" }
+);
+
+watch(
+  [
+    () => props.disabled,
+    () => props.note,
+    () => props.width,
+    () => props.height,
+    () => props.doneButtonHandler,
+  ],
+  () => {
+    uppy.getPlugin("Dashboard")?.setOptions({
+      disabled: props.disabled,
+      note: props.note,
+      width: props.width,
+      height: props.height,
+      doneButtonHandler: props.doneButtonHandler,
+    });
+  },
+  { flush: "post" }
+);
 
 onUnmounted(() => {
-  uppy.value.close({ reason: "unmount" });
+  uppy.off("upload-success", handleUploadSuccess);
+  uppy.off("upload-error", handleUploadError);
+  uppy.destroy();
 });
 </script>
 
@@ -145,6 +346,7 @@ onUnmounted(() => {
       width,
       height,
       doneButtonHandler: doneButtonHandler,
+      metaFields: fileNameMetaFields,
     }"
   />
 </template>

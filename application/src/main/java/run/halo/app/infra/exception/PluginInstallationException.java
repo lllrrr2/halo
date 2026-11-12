@@ -1,7 +1,7 @@
 package run.halo.app.infra.exception;
 
 import jakarta.validation.constraints.Null;
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.springframework.web.server.ServerWebInputException;
 
 /**
@@ -12,8 +12,8 @@ import org.springframework.web.server.ServerWebInputException;
  */
 public class PluginInstallationException extends ServerWebInputException {
 
-    public PluginInstallationException(String reason, @Nullable String messageDetailCode,
-        @Null Object[] messageDetailArguments) {
+    public PluginInstallationException(
+            String reason, @Nullable String messageDetailCode, @Null Object[] messageDetailArguments) {
         super(reason, null, null, messageDetailCode, messageDetailArguments);
     }
 }

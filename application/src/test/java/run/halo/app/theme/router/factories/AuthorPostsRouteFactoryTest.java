@@ -1,7 +1,8 @@
 package run.halo.app.theme.router.factories;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,19 +26,33 @@ import run.halo.app.extension.ReactiveExtensionClient;
 class AuthorPostsRouteFactoryTest extends RouteFactoryTestSuite {
     @Mock
     ReactiveExtensionClient client;
+
     @InjectMocks
     AuthorPostsRouteFactory authorPostsRouteFactory;
 
     @Test
     void create() {
-        RouterFunction<ServerResponse> routerFunction = authorPostsRouteFactory.create(null);
+        var spyAuthorRoute = spy(authorPostsRouteFactory);
+        doReturn(Mono.just(true)).when(spyAuthorRoute).hasPostManageRole(anyString());
+
+        RouterFunction<ServerResponse> routerFunction = spyAuthorRoute.create(null);
         WebTestClient webClient = getWebTestClient(routerFunction);
 
-        when(client.fetch(eq(User.class), eq("fake-user")))
-            .thenReturn(Mono.just(new User()));
-        webClient.get()
-            .uri("/authors/fake-user")
-            .exchange()
-            .expectStatus().isOk();
+        when(client.fetch(eq(User.class), eq("fake-user"))).thenReturn(Mono.just(new User()));
+        webClient.get().uri("/authors/fake-user").exchange().expectStatus().isOk();
+
+        webClient
+                .get()
+                .uri("/authors/fake-user/page/p")
+                .exchange()
+                .expectStatus()
+                .isNotFound();
+
+        webClient
+                .get()
+                .uri("/authors/fake-user/page/abc")
+                .exchange()
+                .expectStatus()
+                .isNotFound();
     }
 }

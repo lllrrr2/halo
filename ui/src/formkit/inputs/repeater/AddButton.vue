@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { VButton, IconAddCircle } from "@halo-dev/components";
 import type { FormKitFrameworkContext } from "@formkit/core";
+import { IconAddCircle, VButton } from "@halo-dev/components";
 import type { PropType } from "vue";
 
 const props = defineProps({
@@ -29,7 +29,7 @@ const handleAppendClick = () => {
   <div :class="context.classes.add" @click="handleAppendClick">
     <VButton :disabled="disabled" type="secondary">
       <template #icon>
-        <IconAddCircle class="h-full w-full" />
+        <IconAddCircle />
       </template>
       {{ context.addLabel || $t("core.common.buttons.add") }}
     </VButton>

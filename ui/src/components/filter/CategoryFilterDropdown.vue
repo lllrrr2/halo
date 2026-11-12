@@ -1,17 +1,15 @@
 <script lang="ts" setup>
-import type { Category } from "@halo-dev/api-client";
-import {
-  VEntity,
-  VEntityField,
-  VDropdown,
-  IconArrowDown,
-} from "@halo-dev/components";
-import { setFocus } from "@/formkit/utils/focus";
-import { computed, ref, watch } from "vue";
-import Fuse from "fuse.js";
 import { usePostCategory } from "@console/modules/contents/posts/categories/composables/use-post-category";
+import type { CategoryTreeNode } from "@console/modules/contents/posts/categories/utils";
+import {
+  VFilterDropdown,
+  type FilterDropdownOption,
+  type FilterDropdownValue,
+} from "@halo-dev/components";
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     label: string;
     modelValue?: string;
@@ -25,117 +23,74 @@ const emit = defineEmits<{
   (event: "update:modelValue", value?: string): void;
 }>();
 
-const { categories } = usePostCategory();
+const { t } = useI18n();
+const { categories, categoriesTree } = usePostCategory();
 
-const dropdown = ref();
-
-const handleSelect = (category: Category) => {
-  if (category.metadata.name === props.modelValue) {
-    emit("update:modelValue", undefined);
-  } else {
-    emit("update:modelValue", category.metadata.name);
-  }
-
-  dropdown.value.hide();
-};
-
-function onDropdownShow() {
-  setTimeout(() => {
-    setFocus("categoryFilterDropdownInput");
-  }, 200);
-}
-
-// search
-const keyword = ref("");
-
-let fuse: Fuse<Category> | undefined = undefined;
-
-watch(
-  () => categories.value,
-  () => {
-    fuse = new Fuse(categories.value || [], {
-      keys: ["spec.displayName", "metadata.name"],
-      useExtendedSearch: true,
-      threshold: 0.2,
-    });
-  },
-  {
-    immediate: true,
-  }
-);
-
-const searchResults = computed(() => {
-  if (!fuse || !keyword.value) {
-    return categories.value;
-  }
-
-  return fuse?.search(keyword.value).map((item) => item.item);
-});
-
-const selectedCategory = computed(() => {
-  return categories.value?.find(
-    (category) => category.metadata.name === props.modelValue
+const categoryMap = computed(() => {
+  return new Map(
+    categories.value?.map((category) => [category.metadata.name, category])
   );
 });
+
+function toOption(node: CategoryTreeNode): FilterDropdownOption {
+  return {
+    label: node.category.spec.displayName,
+    value: node.category.metadata.name,
+    description: node.category.status?.permalink,
+    keywords: [node.category.metadata.name],
+    children: node.children.length ? node.children.map(toOption) : undefined,
+  };
+}
+
+const options = computed<FilterDropdownOption[]>(() => {
+  return categoriesTree.value.map(toOption);
+});
+
+function getCategory(option: FilterDropdownOption) {
+  if (option.value === undefined) {
+    return undefined;
+  }
+
+  return categoryMap.value.get(String(option.value));
+}
+
+function getPostCount(option: FilterDropdownOption) {
+  return t("core.common.fields.post_count", {
+    count: getCategory(option)?.status?.postCount || 0,
+  });
+}
+
+function handleUpdate(value?: FilterDropdownValue) {
+  emit("update:modelValue", typeof value === "string" ? value : undefined);
+}
 </script>
 
 <template>
-  <VDropdown ref="dropdown" :classes="['!p-0']" @show="onDropdownShow">
-    <div
-      class="flex cursor-pointer select-none items-center text-sm text-gray-700 hover:text-black"
-      :class="{ 'font-semibold text-gray-700': modelValue !== undefined }"
-    >
-      <span v-if="!selectedCategory" class="mr-0.5">
-        {{ label }}
-      </span>
-      <span v-else class="mr-0.5">
-        {{ label }}：{{ selectedCategory.spec.displayName }}
-      </span>
-      <span>
-        <IconArrowDown />
-      </span>
-    </div>
-    <template #popper>
-      <div class="h-96 w-80">
-        <div class="border-b border-b-gray-100 bg-white p-4">
-          <FormKit
-            id="categoryFilterDropdownInput"
-            v-model="keyword"
-            :placeholder="$t('core.common.placeholder.search')"
-            type="text"
-          ></FormKit>
-        </div>
-        <div>
-          <ul
-            class="box-border h-full w-full divide-y divide-gray-100"
-            role="list"
-          >
-            <li
-              v-for="(category, index) in searchResults"
-              :key="index"
-              @click="handleSelect(category)"
-            >
-              <VEntity :is-selected="modelValue === category.metadata.name">
-                <template #start>
-                  <VEntityField
-                    :title="category.spec.displayName"
-                    :description="category.status?.permalink"
-                  />
-                </template>
-                <template #end>
-                  <VEntityField
-                    :description="
-                      $t('core.common.fields.post_count', {
-                        count: category.status?.postCount || 0,
-                      })
-                    "
-                  />
-                </template>
-              </VEntity>
-            </li>
-          </ul>
-        </div>
+  <VFilterDropdown
+    :model-value="modelValue"
+    :label="label"
+    :options="options"
+    searchable
+    :search-placeholder="$t('core.common.placeholder.search')"
+    :empty-text="$t('core.components.global_search.no_results')"
+    panel-width="22rem"
+    @update:model-value="handleUpdate"
+  >
+    <template #option="{ option, selected }">
+      <div class="flex min-w-0 flex-1 flex-col">
+        <span
+          class="truncate text-sm"
+          :class="selected ? 'font-medium text-gray-900' : 'text-gray-700'"
+        >
+          {{ option.label }}
+        </span>
+        <span v-if="option.description" class="truncate text-xs text-gray-500">
+          {{ option.description }}
+        </span>
       </div>
+      <span class="shrink-0 text-xs text-gray-500">
+        {{ getPostCount(option) }}
+      </span>
     </template>
-  </VDropdown>
+  </VFilterDropdown>
 </template>

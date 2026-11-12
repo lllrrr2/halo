@@ -2,9 +2,7 @@ package run.halo.app.infra;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,12 +10,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import org.json.JSONException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -27,7 +27,9 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.util.FileSystemUtils;
 import reactor.core.publisher.Mono;
+import run.halo.app.extension.ExtensionUtil;
 import run.halo.app.extension.GroupVersionKind;
+import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Unstructured;
 import run.halo.app.infra.properties.HaloProperties;
@@ -44,8 +46,10 @@ class ExtensionResourceInitializerTest {
 
     @Mock
     ReactiveExtensionClient extensionClient;
+
     @Mock
     HaloProperties haloProperties;
+
     @Mock
     ApplicationStartedEvent applicationStartedEvent;
 
@@ -64,7 +68,7 @@ class ExtensionResourceInitializerTest {
         Path tempDirectory = Files.createTempDirectory("extension-resource-initializer-test");
         dirsToClean.add(tempDirectory);
         Path multiDirectory =
-            Files.createDirectories(tempDirectory.resolve("a").resolve("b").resolve("c"));
+                Files.createDirectories(tempDirectory.resolve("a").resolve("b").resolve("c"));
         Files.writeString(tempDirectory.resolve("hello.yml"), """
                 kind: FakeExtension
                 apiVersion: v1
@@ -72,14 +76,12 @@ class ExtensionResourceInitializerTest {
                   name: fake-extension
                 spec:
                   hello: world
-                """,
-            StandardCharsets.UTF_8);
+                """, StandardCharsets.UTF_8);
 
         Files.writeString(multiDirectory.getParent().resolve("fake-1.txt"), """
                 kind: FakeExtension
                 name: fake-extension
-                """,
-            StandardCharsets.UTF_8);
+                """, StandardCharsets.UTF_8);
         Files.writeString(multiDirectory.resolve("fake.yaml"), """
                 kind: FakeExtension
                 apiVersion: v1
@@ -87,8 +89,7 @@ class ExtensionResourceInitializerTest {
                   name: fake-extension
                 spec:
                   hello: world
-                """,
-            StandardCharsets.UTF_8);
+                """, StandardCharsets.UTF_8);
 
         // test file in directory
         Path secondTempDir = Files.createTempDirectory("extension-resource-file-test");
@@ -101,13 +102,13 @@ class ExtensionResourceInitializerTest {
                   name: config-file-is-ok
                 spec:
                   key: value
-                """,
-            StandardCharsets.UTF_8);
+                """, StandardCharsets.UTF_8);
 
         when(haloProperties.getInitialExtensionLocations())
-            .thenReturn(Set.of("file:" + tempDirectory + "/**/*.yaml",
-                "file:" + tempDirectory + "/**/*.yml",
-                "file:" + filePath));
+                .thenReturn(Set.of(
+                        "file:" + tempDirectory + "/**/*.yaml",
+                        "file:" + tempDirectory + "/**/*.yml",
+                        "file:" + filePath));
     }
 
     @AfterEach
@@ -119,16 +120,52 @@ class ExtensionResourceInitializerTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void shouldRetireThumbnailProvider(boolean existing) {
+        when(haloProperties.isRequiredExtensionDisabled()).thenReturn(true);
+        when(haloProperties.getInitialExtensionLocations())
+                .thenReturn(Set.of("classpath:/extensions/extensionpoint-definitions.yaml"));
+        var definition = new Unstructured();
+        definition.setMetadata(new Metadata());
+        definition.getMetadata().setName("thumbnail-provider");
+        definition.getMetadata().setVersion(1L);
+        when(extensionClient.fetch(any(GroupVersionKind.class), any()))
+                .thenAnswer(invocation -> existing && "thumbnail-provider".equals(invocation.getArgument(1))
+                        ? Mono.just(definition)
+                        : Mono.empty());
+        when(extensionClient.create(any())).thenReturn(Mono.empty());
+        if (existing) {
+            when(extensionClient.update(any())).thenReturn(Mono.empty());
+        }
+
+        extensionResourceInitializer.start();
+
+        var created = ArgumentCaptor.forClass(Unstructured.class);
+        verify(extensionClient, atLeastOnce()).create(created.capture());
+        assertThat(created.getAllValues())
+                .noneMatch(resource ->
+                        "thumbnail-provider".equals(resource.getMetadata().getName()));
+        if (existing) {
+            var updated = ArgumentCaptor.forClass(Unstructured.class);
+            verify(extensionClient).update(updated.capture());
+            assertThat(updated.getValue().getMetadata().getName()).isEqualTo("thumbnail-provider");
+            assertThat(updated.getValue().getMetadata().getDeletionTimestamp()).isNotNull();
+            assertThat(updated.getValue().getMetadata().getVersion()).isEqualTo(1L);
+        } else {
+            verify(extensionClient, never()).update(any());
+        }
+    }
+
     @Test
-    void onApplicationEvent() throws JSONException {
+    void shouldStartCorrectly() throws Exception {
         when(haloProperties.isRequiredExtensionDisabled()).thenReturn(true);
         var argumentCaptor = ArgumentCaptor.forClass(Unstructured.class);
 
-        when(extensionClient.fetch(any(GroupVersionKind.class), any()))
-            .thenReturn(Mono.empty());
+        when(extensionClient.fetch(any(GroupVersionKind.class), any())).thenReturn(Mono.empty());
         when(extensionClient.create(any())).thenReturn(Mono.empty());
 
-        extensionResourceInitializer.onApplicationEvent(applicationStartedEvent);
+        extensionResourceInitializer.start();
 
         verify(extensionClient, times(3)).create(argumentCaptor.capture());
 
@@ -169,5 +206,26 @@ class ExtensionResourceInitializerTest {
                  }
             ]
             """, JsonUtils.objectToJson(values), false);
+    }
+
+    @Test
+    void shouldNotUpdateExtensionWithDoNotOverwriteLabel() throws Exception {
+        when(haloProperties.isRequiredExtensionDisabled()).thenReturn(true);
+        var existing = new Unstructured(Map.of(
+                "apiVersion", "v1",
+                "kind", "FakeExtension",
+                "metadata",
+                        Map.of(
+                                "name",
+                                "fake-extension",
+                                "labels",
+                                Map.of(ExtensionUtil.DO_NOT_OVERWRITE_LABEL, "true"))));
+
+        when(extensionClient.fetch(any(GroupVersionKind.class), any())).thenReturn(Mono.just(existing));
+
+        extensionResourceInitializer.start();
+
+        verify(extensionClient, never()).update(any());
+        verify(extensionClient, never()).create(any());
     }
 }

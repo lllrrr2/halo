@@ -35,6 +35,9 @@ public class ReplyVo implements ExtensionVoOperator {
     @Schema(requiredMode = REQUIRED)
     private CommentStatsVo stats;
 
+    @Schema(description = "Frontend permalink to this reply, when its subject URL is available.")
+    private String permalink;
+
     /**
      * Convert {@link Reply} to {@link ReplyVo}.
      *
@@ -43,9 +46,6 @@ public class ReplyVo implements ExtensionVoOperator {
      */
     public static ReplyVo from(Reply reply) {
         Reply.ReplySpec spec = reply.getSpec();
-        return ReplyVo.builder()
-            .metadata(reply.getMetadata())
-            .spec(spec)
-            .build();
+        return ReplyVo.builder().metadata(reply.getMetadata()).spec(spec).build();
     }
 }

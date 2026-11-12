@@ -1,249 +1,141 @@
-import TiptapTable, {
-  type TableOptions,
+import type { KeyboardShortcutCommand } from "@tiptap/core";
+import {
   createColGroup,
+  Table as TiptapTable,
+  type TableOptions,
 } from "@tiptap/extension-table";
-import {
-  isActive,
-  type Editor,
-  type Range,
-  mergeAttributes,
-  isNodeActive,
-  CoreEditor,
-  findParentNode,
-} from "@/tiptap";
-import {
-  type Node as ProseMirrorNode,
-  type NodeView,
-  type EditorState,
-  type DOMOutputSpec,
-  TextSelection,
-} from "@/tiptap/pm";
-import TableCell from "./table-cell";
-import TableRow from "./table-row";
-import TableHeader from "./table-header";
+import { markRaw } from "vue";
 import MdiTable from "~icons/mdi/table";
 import MdiTablePlus from "~icons/mdi/table-plus";
-import MdiTableColumnPlusBefore from "~icons/mdi/table-column-plus-before";
-import MdiTableColumnPlusAfter from "~icons/mdi/table-column-plus-after";
-import MdiTableRowPlusAfter from "~icons/mdi/table-row-plus-after";
-import MdiTableRowPlusBefore from "~icons/mdi/table-row-plus-before";
-import MdiTableColumnRemove from "~icons/mdi/table-column-remove";
-import MdiTableRowRemove from "~icons/mdi/table-row-remove";
-import MdiTableRemove from "~icons/mdi/table-remove";
-import MdiTableHeadersEye from "~icons/mdi/table-headers-eye";
-import MdiTableMergeCells from "~icons/mdi/table-merge-cells";
-import MdiTableSplitCell from "~icons/mdi/table-split-cell";
-import FluentTableColumnTopBottom24Regular from "~icons/fluent/table-column-top-bottom-24-regular";
-import { markRaw } from "vue";
+import { CONVERT_TO_KEY } from "@/components/drag/default-drag";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
-import type { ExtensionOptions, NodeBubbleMenu } from "@/types";
-import { BlockActionSeparator, ToolboxItem } from "@/components";
 import {
-  findNextCell,
-  findPreviousCell,
+  Editor,
+  findParentNode,
+  isActive,
+  isNodeActive,
+  mergeAttributes,
+  posToDOMRect,
+  type Range,
+} from "@/tiptap";
+import {
+  Fragment,
+  Plugin,
+  PluginKey,
+  Slice,
+  type DOMOutputSpec,
+  type EditorState,
+  type EditorView,
+} from "@/tiptap/pm";
+import type { ExtensionOptions, NodeBubbleMenuType } from "@/types";
+import {
   hasTableBefore,
   isCellSelection,
   isTableSelected,
   selectTable,
-} from "./util";
+} from "@/utils/table";
+import {
+  joinStyles,
+  parseTableLayoutMode,
+  type CellVerticalAlign,
+  type TableLayoutMode,
+} from "./attributes";
+import { handlePastedTableCells } from "./clipboard";
+import { autoColumnResizing } from "./column-resizing";
+import { getColumnPercentages, getTableColumnWidths } from "./column-widths";
+import {
+  fitTableToWidthCommand,
+  clearSelectedAxisCommand,
+  clearTableCellFormattingCommand,
+  copyTableCommand,
+  deleteAxisCommand,
+  duplicateAxisCommand,
+  moveAxisCommand,
+  moveAxisToCommand,
+  selectTableCommand,
+  setCellAttributeCommand,
+  setTableLayoutCommand,
+  setTableRowHeightCommand,
+} from "./commands";
+import TableBubbleMenu from "./components/TableBubbleMenu.vue";
+import TableInsertToolboxItem from "./components/TableInsertToolboxItem.vue";
+import TableCell from "./table-cell";
+import { TableControls } from "./table-controls";
+import TableHeader from "./table-header";
+import TableRow from "./table-row";
+import { HaloTableView } from "./table-view";
 
-function updateColumns(
-  node: ProseMirrorNode,
-  colgroup: Element,
-  table: HTMLElement,
-  cellMinWidth: number,
-  overrideCol?: number,
-  overrideValue?: any
-) {
-  let totalWidth = 0;
-  let fixedWidth = true;
-  let nextDOM = colgroup.firstChild as HTMLElement;
-  const row = node.firstChild;
-  if (!row) return;
+export * from "./attributes";
+export * from "./table-view";
 
-  for (let i = 0, col = 0; i < row.childCount; i += 1) {
-    const { colspan, colwidth } = row.child(i).attrs;
+export const TABLE_BUBBLE_MENU_KEY = new PluginKey("tableBubbleMenu");
+const TABLE_LAYOUT_PLUGIN_KEY = new PluginKey("haloTableLayout");
 
-    for (let j = 0; j < colspan; j += 1, col += 1) {
-      const hasWidth =
-        overrideCol === col ? overrideValue : colwidth && colwidth[j];
-      const cssWidth = hasWidth ? `${hasWidth}px` : "";
+export type ExtensionTableOptions = ExtensionOptions & Partial<TableOptions>;
 
-      totalWidth += hasWidth || cellMinWidth;
-
-      if (!hasWidth) {
-        fixedWidth = false;
-      }
-
-      if (!nextDOM) {
-        colgroup.appendChild(document.createElement("col")).style.width =
-          cssWidth;
-      } else {
-        if (nextDOM.style.width !== cssWidth) {
-          nextDOM.style.width = cssWidth;
-        }
-
-        nextDOM = nextDOM.nextSibling as HTMLElement;
-      }
-    }
-  }
-
-  while (nextDOM) {
-    const after = nextDOM.nextSibling as HTMLElement;
-
-    nextDOM.parentNode?.removeChild(nextDOM);
-    nextDOM = after;
-  }
-
-  if (fixedWidth) {
-    table.style.width = `${totalWidth}px`;
-    table.style.minWidth = "";
-  } else {
-    table.style.width = "";
-    table.style.minWidth = `${totalWidth}px`;
-  }
-}
-
-let editor: CoreEditor | undefined = undefined;
-
-class TableView implements NodeView {
-  node: ProseMirrorNode;
-
-  cellMinWidth: number;
-
-  dom: HTMLElement;
-
-  scrollDom: HTMLElement;
-
-  table: HTMLElement;
-
-  colgroup: HTMLElement;
-
-  contentDOM: HTMLElement;
-
-  containerDOM: HTMLElement;
-
-  constructor(node: ProseMirrorNode, cellMinWidth: number) {
-    this.node = node;
-    this.cellMinWidth = cellMinWidth;
-    this.dom = document.createElement("div");
-    this.dom.className = "table-container";
-
-    this.containerDOM = this.dom.appendChild(document.createElement("div"));
-
-    this.containerDOM.className = "tableWrapper";
-    this.containerDOM.addEventListener("wheel", (e) => {
-      return this.handleHorizontalWheel(this.containerDOM, e);
-    });
-
-    let mouseX = 0;
-    let mouseY = 0;
-    document.addEventListener("mousemove", function (event) {
-      mouseX = event.clientX;
-      mouseY = event.clientY;
-    });
-
-    this.containerDOM.addEventListener("scroll", () => {
-      if (!editor) {
-        return false;
-      }
-      const { view } = editor;
-      const coords = { left: mouseX, top: mouseY };
-      const pos = view.posAtCoords(coords);
-      editor.commands.setTextSelection(pos?.pos || 0);
-    });
-
-    this.scrollDom = document.createElement("div");
-    this.scrollDom.className = "scrollWrapper";
-    this.containerDOM.appendChild(this.scrollDom);
-
-    this.table = this.scrollDom.appendChild(document.createElement("table"));
-    this.colgroup = this.table.appendChild(document.createElement("colgroup"));
-    updateColumns(node, this.colgroup, this.table, cellMinWidth);
-    this.contentDOM = this.table.appendChild(document.createElement("tbody"));
-    // delay execution during initialization, otherwise
-    // the correct scrollWidth cannot be obtained.
-    setTimeout(() => {
-      this.updateTableShadow();
-    });
-  }
-
-  update(node: ProseMirrorNode) {
-    if (node.type !== this.node.type) {
-      return false;
-    }
-
-    this.node = node;
-    updateColumns(node, this.colgroup, this.table, this.cellMinWidth);
-    this.updateTableShadow();
-    return true;
-  }
-
-  updateTableShadow() {
-    const { scrollWidth, clientWidth, scrollLeft } = this
-      .containerDOM as HTMLElement;
-    if (scrollWidth > clientWidth && scrollLeft < scrollWidth - clientWidth) {
-      this.dom.classList.add("table-right-shadow");
-    } else {
-      this.dom.classList.remove("table-right-shadow");
-    }
-    if (scrollLeft > 0) {
-      this.dom.classList.add("table-left-shadow");
-    } else {
-      this.dom.classList.remove("table-left-shadow");
-    }
-  }
-
-  ignoreMutation(
-    mutation: MutationRecord | { type: "selection"; target: Element }
-  ) {
-    return (
-      mutation.type === "attributes" &&
-      (mutation.target === this.table ||
-        mutation.target === this.dom ||
-        this.colgroup.contains(mutation.target))
-    );
-  }
-
-  handleHorizontalWheel(dom: HTMLElement, event: WheelEvent) {
-    const { scrollWidth, clientWidth } = dom;
-    const hasScrollWidth = scrollWidth > clientWidth;
-    if (hasScrollWidth) {
-      event.stopPropagation();
-      event.preventDefault();
-      dom.scrollBy({ left: event.deltaY });
-    }
-  }
-}
-
-const Table = TiptapTable.extend<ExtensionOptions & TableOptions>({
-  addExtensions() {
-    return [TableCell, TableRow, TableHeader];
+export const ExtensionTable = TiptapTable.extend<ExtensionTableOptions>({
+  priority: 1000,
+  haloEditorIndentation: {
+    keyboard: "passthrough",
   },
+
+  addHaloEditorMetadata() {
+    return {
+      ai: {
+        description: "A table of rows containing header or data cells.",
+        exposure: "recommended",
+        useWhen: ["Comparing structured values across rows and columns."],
+        avoidWhen: [
+          "The information is a simple list or the table would be used only for visual layout.",
+        ],
+        contentGuidelines: [
+          "Use header cells where they clarify row or column meaning.",
+          "Keep each cell focused on one value or concise piece of content.",
+        ],
+        attributeGuidance: {
+          layoutMode: {
+            description:
+              "Table layout mode. Automatic layout fills the available content width; fixed layout preserves deliberate column widths.",
+            examples: ["auto", "fixed"],
+            omitWhen: ["Automatic table sizing is appropriate."],
+          },
+        },
+        generation: {
+          mode: "direct-html",
+        },
+        examples: [
+          "<table><tbody><tr><th><p>Name</p></th><th><p>Status</p></th></tr><tr><td><p>Halo</p></td><td><p>Active</p></td></tr></tbody></table>",
+          '<table><tbody><tr><th colspan="2"><p>Quarterly results</p></th></tr><tr><td rowspan="2"><p>Revenue</p></td><td><p>Q1</p></td></tr><tr><td><p>Q2</p></td></tr></tbody></table>',
+        ],
+      },
+    };
+  },
+
+  addExtensions() {
+    return [TableCell, TableRow, TableHeader, TableControls];
+  },
+
   addOptions() {
     return {
       ...this.parent?.(),
       HTMLAttributes: {},
       resizable: true,
+      renderWrapper: true,
       handleWidth: 5,
       cellMinWidth: 25,
-      View: TableView as unknown as NodeView,
+      View: HaloTableView,
       lastColumnResizable: true,
       allowTableNodeSelection: false,
       getToolboxItems({ editor }: { editor: Editor }) {
         return {
-          priority: 15,
-          component: markRaw(ToolboxItem),
+          priority: 40,
+          component: markRaw(TableInsertToolboxItem),
           props: {
             editor,
             icon: markRaw(MdiTablePlus),
             title: i18n.global.t("editor.menus.table.add"),
-            action: () =>
-              editor
-                .chain()
-                .focus()
-                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                .run(),
+            description: i18n.global.t("editor.menus.table.insert_description"),
           },
         };
       },
@@ -259,358 +151,420 @@ const Table = TiptapTable.extend<ExtensionOptions & TableOptions>({
               .focus()
               .deleteRange(range)
               .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+              .fitTableToWidth()
               .run();
           },
         };
       },
-      getBubbleMenu({ editor }): NodeBubbleMenu {
+      getBubbleMenu({ editor }): NodeBubbleMenuType {
         return {
-          pluginKey: "tableBubbleMenu",
+          pluginKey: TABLE_BUBBLE_MENU_KEY,
+          component: markRaw(TableBubbleMenu),
           shouldShow: ({ state }: { state: EditorState }): boolean => {
-            return isActive(state, Table.name);
+            return isActive(state, "table");
           },
-          getRenderContainer(node) {
-            let container = node;
-            if (container.nodeName === "#text") {
-              container = node.parentElement as HTMLElement;
-            }
-            while (
-              container &&
-              container.classList &&
-              !container.classList.contains("tableWrapper")
-            ) {
-              container = container.parentElement as HTMLElement;
-            }
-            return container;
+          options: {
+            placement: "top-start",
+            offset: 8,
+            flip: {
+              padding: 8,
+              fallbackPlacements: ["bottom-start"],
+            },
+            shift: {
+              padding: 8,
+              crossAxis: true,
+            },
           },
-          tippyOptions: {
-            offset: [26, 0],
+          getReferencedVirtualElement() {
+            return getTableBubbleMenuVirtualElement(editor);
           },
-          items: [
-            {
-              priority: 10,
-              props: {
-                icon: markRaw(MdiTableColumnPlusBefore),
-                title: i18n.global.t("editor.menus.table.add_column_before"),
-                action: () => {
-                  editor.chain().focus().addColumnBefore().run();
-                },
-              },
-            },
-            {
-              priority: 20,
-              props: {
-                icon: markRaw(MdiTableColumnPlusAfter),
-                title: i18n.global.t("editor.menus.table.add_column_after"),
-                action: () => editor.chain().focus().addColumnAfter().run(),
-              },
-            },
-            {
-              priority: 30,
-              props: {
-                icon: markRaw(MdiTableColumnRemove),
-                title: i18n.global.t("editor.menus.table.delete_column"),
-                action: () => editor.chain().focus().deleteColumn().run(),
-              },
-            },
-            {
-              priority: 40,
-              component: markRaw(BlockActionSeparator),
-            },
-            {
-              priority: 50,
-              props: {
-                icon: markRaw(MdiTableRowPlusBefore),
-                title: i18n.global.t("editor.menus.table.add_row_before"),
-                action: () => editor.chain().focus().addRowBefore().run(),
-              },
-            },
-            {
-              priority: 60,
-              props: {
-                icon: markRaw(MdiTableRowPlusAfter),
-                title: i18n.global.t("editor.menus.table.add_row_after"),
-                action: () => editor.chain().focus().addRowAfter().run(),
-              },
-            },
-            {
-              priority: 70,
-              props: {
-                icon: markRaw(MdiTableRowRemove),
-                title: i18n.global.t("editor.menus.table.delete_row"),
-                action: () => editor.chain().focus().deleteRow().run(),
-              },
-            },
-            {
-              priority: 80,
-              component: markRaw(BlockActionSeparator),
-            },
-            {
-              priority: 90,
-              props: {
-                icon: markRaw(MdiTableHeadersEye),
-                title: i18n.global.t("editor.menus.table.toggle_header_column"),
-                action: () => editor.chain().focus().toggleHeaderColumn().run(),
-              },
-            },
-            {
-              priority: 100,
-              props: {
-                icon: markRaw(MdiTableHeadersEye),
-                title: i18n.global.t("editor.menus.table.toggle_header_row"),
-                action: () => editor.chain().focus().toggleHeaderRow().run(),
-              },
-            },
-            {
-              priority: 101,
-              props: {
-                icon: markRaw(FluentTableColumnTopBottom24Regular),
-                title: i18n.global.t("editor.menus.table.toggle_header_cell"),
-                action: () => editor.chain().focus().toggleHeaderCell().run(),
-              },
-            },
-            {
-              priority: 110,
-              component: markRaw(BlockActionSeparator),
-            },
-            {
-              priority: 120,
-              props: {
-                icon: markRaw(MdiTableMergeCells),
-                title: i18n.global.t("editor.menus.table.merge_cells"),
-                action: () => editor.chain().focus().mergeCells().run(),
-              },
-            },
-            {
-              priority: 130,
-              props: {
-                icon: markRaw(MdiTableSplitCell),
-                title: i18n.global.t("editor.menus.table.split_cell"),
-                action: () => editor.chain().focus().splitCell().run(),
-              },
-            },
-            {
-              priority: 140,
-              component: markRaw(BlockActionSeparator),
-            },
-            {
-              priority: 150,
-              props: {
-                icon: markRaw(MdiTableRemove),
-                title: i18n.global.t("editor.menus.table.delete_table"),
-                action: () => editor.chain().focus().deleteTable().run(),
-              },
-            },
-          ],
         };
       },
-      getDraggable() {
+      getDraggableMenuItems() {
         return {
-          getRenderContainer({ dom }) {
-            let container = dom;
-            while (container && !container.classList.contains("tableWrapper")) {
-              container = container.parentElement as HTMLElement;
-            }
-            return {
-              el: container,
-              dragDomOffset: {
-                x: 20,
-                y: 20,
-              },
-            };
-          },
-          handleDrop({ view, event, slice, insertPos }) {
-            const { state } = view;
-            const $pos = state.selection.$anchor;
-            for (let d = $pos.depth; d > 0; d--) {
-              const node = $pos.node(d);
-              if (node.type.spec["tableRole"] == "table") {
-                const eventPos = view.posAtCoords({
-                  left: event.clientX,
-                  top: event.clientY,
-                });
-                if (!eventPos) {
-                  return;
-                }
-                if (!slice) {
-                  return;
-                }
-
-                let tr = state.tr;
-                tr = tr.delete($pos.before(d), $pos.after(d));
-                const pos = tr.mapping.map(insertPos);
-                tr = tr.replaceRange(pos, pos, slice).scrollIntoView();
-
-                if (tr) {
-                  view.dispatch(tr);
-                  event.preventDefault();
-                  return true;
-                }
-
-                return false;
-              }
-            }
+          extendsKey: CONVERT_TO_KEY,
+          visible({ editor }): boolean {
+            return !isActive(editor.state, "table");
           },
         };
       },
     };
   },
 
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      layoutMode: {
+        default: "auto",
+        parseHTML: parseTableLayoutMode,
+        renderHTML: ({ layoutMode }: { layoutMode: TableLayoutMode }) => ({
+          "data-table-layout": layoutMode,
+        }),
+      },
+    };
+  },
+
+  addCommands() {
+    return {
+      ...this.parent?.(),
+      deleteRow: () => deleteAxisCommand("row"),
+      deleteColumn: () => deleteAxisCommand("column"),
+      setTableLayout: (layoutMode: TableLayoutMode) =>
+        setTableLayoutCommand(layoutMode),
+      fitTableToWidth: () => fitTableToWidthCommand(),
+      setTableRowHeight: (height: number | null) =>
+        setTableRowHeightCommand(height),
+      setTableCellBackground: (color: string | null) => (props) =>
+        setCellAttributeCommand("backgroundColor", color)(props),
+      setTableCellVerticalAlign:
+        (alignment: CellVerticalAlign | null) => (props) =>
+          setCellAttributeCommand("verticalAlign", alignment)(props),
+      clearTableCellFormatting: () => clearTableCellFormattingCommand(),
+      clearSelectedTableRow: () => clearSelectedAxisCommand("row"),
+      clearSelectedTableColumn: () => clearSelectedAxisCommand("column"),
+      duplicateTableRow: () => duplicateAxisCommand("row"),
+      duplicateTableColumn: () => duplicateAxisCommand("column"),
+      moveTableRow: (direction: -1 | 1) => moveAxisCommand("row", direction),
+      moveTableColumn: (direction: -1 | 1) =>
+        moveAxisCommand("column", direction),
+      moveTableRowTo: (target: number) => moveAxisToCommand("row", target),
+      moveTableColumnTo: (target: number) =>
+        moveAxisToCommand("column", target),
+      selectCurrentTable: () => selectTableCommand("table"),
+      selectTableRow: (index: number) => selectTableCommand("row", index),
+      selectTableColumn: (index: number) => selectTableCommand("column", index),
+      copyTable: () => copyTableCommand(),
+    };
+  },
+
   addKeyboardShortcuts() {
-    const handleBackspace = () => {
+    const parentShortcuts = this.parent?.() ?? {};
+    const handleBackspace = (
+      fallback: KeyboardShortcutCommand | undefined,
+      props: Parameters<KeyboardShortcutCommand>[0]
+    ): boolean => {
       const { editor } = this;
       if (editor.commands.undoInputRule()) {
         return true;
       }
 
       const { selection } = editor.state;
-      // the node in the current active state is not a table
-      // and the previous node is a table
       if (
-        !isNodeActive(editor.state, Table.name) &&
-        hasTableBefore(editor.state) &&
+        !isNodeActive(editor.state, "table") &&
+        hasTableBefore(selection) &&
         selection.empty
       ) {
         editor.commands.selectNodeBackward();
         return true;
       }
 
-      if (!isNodeActive(editor.state, Table.name)) {
-        return false;
-      }
-
-      // If the table is currently selected,
-      // then delete the whole table
-      if (isTableSelected(editor.state.selection)) {
+      if (isNodeActive(editor.state, "table") && isTableSelected(selection)) {
         editor.commands.deleteTable();
         return true;
       }
 
-      return false;
+      return fallback?.(props) ?? false;
     };
 
-    return {
-      Backspace: () => handleBackspace(),
-
-      "Mod-Backspace": () => handleBackspace(),
-
+    const shortcuts: Record<string, KeyboardShortcutCommand> = {
+      ...parentShortcuts,
+      Backspace: (props) => handleBackspace(parentShortcuts.Backspace, props),
+      "Mod-Backspace": (props) =>
+        handleBackspace(parentShortcuts["Mod-Backspace"], props),
       "Mod-a": ({ editor }) => {
-        if (!isNodeActive(editor.state, Table.name)) {
+        if (!isNodeActive(editor.state, "table")) {
           return false;
         }
 
         const { tr, selection } = editor.state;
-        // If the entire table is already selected, no longer perform the select all operation.
         if (isTableSelected(selection)) {
-          return true;
+          return editor.commands.selectAll();
         }
 
         if (isCellSelection(selection)) {
-          selectTable(tr);
-          editor.view.dispatch(tr);
+          editor.view.dispatch(selectTable(tr));
           return true;
         }
 
-        let cellNodePos = findParentNode(
-          (node) => node.type.name === TableCell.name
-        )(selection);
-        if (!cellNodePos) {
-          cellNodePos = findParentNode(
-            (node) => node.type.name === TableHeader.name
-          )(selection);
-        }
-        if (!cellNodePos) {
+        const cell =
+          findParentNode((node) => node.type.name === TableCell.name)(
+            selection
+          ) ??
+          findParentNode((node) => node.type.name === TableHeader.name)(
+            selection
+          );
+        if (!cell) {
           return false;
         }
-        editor.commands.setNodeSelection(cellNodePos.pos);
-        return true;
-      },
-      Tab: ({ editor }) => {
-        const { state } = editor;
-        if (!isActive(editor.state, Table.name)) {
-          return false;
-        }
-        let nextView = editor.view;
-        let nextTr = editor.state.tr;
 
-        let nextCell = findNextCell(state);
-        if (!nextCell) {
-          // If it is the last cell, create a new line and jump to the first cell of the new line.
-          editor
-            .chain()
-            .addRowAfter()
-            .command(({ tr, view, state }) => {
-              nextView = view;
-              nextTr = tr;
-              nextCell = findNextCell(state);
-              return true;
-            });
-        }
-        if (nextCell) {
-          nextTr.setSelection(
-            new TextSelection(
-              nextTr.doc.resolve(nextCell.start),
-              nextTr.doc.resolve(
-                nextCell.start + (nextCell.node?.nodeSize || 0) - 4
-              )
-            )
-          );
-          nextTr.scrollIntoView();
-          nextView.dispatch(nextTr);
-          return true;
-        }
-        return false;
-      },
-      "Shift-Tab": ({ editor }) => {
-        const { tr } = editor.state;
-        if (!isActive(editor.state, Table.name)) {
-          return false;
-        }
-        const previousCell = findPreviousCell(editor.state);
-        if (previousCell) {
-          tr.setSelection(
-            new TextSelection(
-              tr.doc.resolve(previousCell.start),
-              tr.doc.resolve(
-                previousCell.start + (previousCell.node?.nodeSize || 0) - 4
-              )
-            )
-          );
-          tr.scrollIntoView();
-          editor.view.dispatch(tr);
-        }
-        return true;
+        return editor.commands.setCellSelection({
+          anchorCell: cell.pos,
+        });
       },
     };
+
+    return defineHaloKeyboardShortcuts(
+      {
+        editor: this.editor,
+        name: this.name,
+        parent: () => shortcuts,
+      },
+      [
+        {
+          id: "editor.table.mergeCells",
+          keys: ["Mod-Shift-1"],
+          label: () => i18n.global.t("editor.menus.table.merge_cells"),
+          category: "structure",
+          priority: 130,
+          command: () => this.editor.commands.mergeCells(),
+        },
+        {
+          id: "editor.table.verticalAlignTop",
+          keys: ["Mod-Alt-Shift-t"],
+          label: () => i18n.global.t("editor.menus.table.vertical_top"),
+          category: "structure",
+          priority: 131,
+          command: () => this.editor.commands.setTableCellVerticalAlign("top"),
+        },
+        {
+          id: "editor.table.verticalAlignMiddle",
+          keys: ["Mod-Alt-Shift-c"],
+          label: () => i18n.global.t("editor.menus.table.vertical_middle"),
+          category: "structure",
+          priority: 132,
+          command: () =>
+            this.editor.commands.setTableCellVerticalAlign("middle"),
+        },
+        {
+          id: "editor.table.verticalAlignBottom",
+          keys: ["Mod-Alt-Shift-b"],
+          label: () => i18n.global.t("editor.menus.table.vertical_bottom"),
+          category: "structure",
+          priority: 133,
+          command: () =>
+            this.editor.commands.setTableCellVerticalAlign("bottom"),
+        },
+      ]
+    );
   },
 
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: TABLE_LAYOUT_PLUGIN_KEY,
+        props: {
+          handlePaste: (view, event, slice) =>
+            handleTabSeparatedPaste(view, event) ||
+            handlePastedTableCells(view, slice),
+        },
+      }),
+      autoColumnResizing(this.options.cellMinWidth ?? 25),
+      ...(this.parent?.() ?? []),
+    ];
+  },
+
+  transformPastedHTML: transformPastedTableHTML,
+
   renderHTML({ node, HTMLAttributes }) {
+    const layoutMode =
+      (node.attrs.layoutMode as TableLayoutMode | undefined) ?? "auto";
+    const cellMinWidth = this.options.cellMinWidth ?? 25;
     const { colgroup, tableWidth, tableMinWidth } = createColGroup(
       node,
-      this.options.cellMinWidth
+      cellMinWidth
+    );
+
+    const indent = HTMLAttributes?.["data-indent"];
+    const configuredStyle = this.options.HTMLAttributes?.style as
+      | string
+      | undefined;
+    const contentStyle = indent
+      ? undefined
+      : (HTMLAttributes.style as string | undefined);
+    const tableHTMLAttributes = indent
+      ? Object.fromEntries(
+          Object.entries(HTMLAttributes ?? {}).filter(
+            ([name]) => name !== "style"
+          )
+        )
+      : HTMLAttributes;
+    const autoWidths = layoutMode === "auto" ? getTableColumnWidths(node) : [];
+    const autoColgroup: DOMOutputSpec = [
+      "colgroup",
+      ...getColumnPercentages(autoWidths).map((width): DOMOutputSpec => [
+        "col",
+        { style: `width: ${width}; min-width: ${cellMinWidth}px` },
+      ]),
+    ];
+    const layoutStyle =
+      layoutMode === "auto"
+        ? `display: table; width: 100%; min-width: 100%; table-layout: ${autoWidths.length ? "fixed" : "auto"}`
+        : joinStyles(
+            "display: table",
+            `width: ${tableWidth || "100%"}`,
+            tableMinWidth && `min-width: ${tableMinWidth}`,
+            "table-layout: fixed"
+          );
+    const tableAttributes = mergeAttributes(
+      this.options.HTMLAttributes ?? {},
+      tableHTMLAttributes ?? {},
+      {
+        "data-table-layout": layoutMode,
+        style: joinStyles(configuredStyle, contentStyle, layoutStyle),
+      }
     );
 
     const table: DOMOutputSpec = [
-      "div",
-      { style: "overflow-x: auto; overflow-y: hidden;" },
-      [
-        "table",
-        mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
-          style: tableWidth
-            ? `width: ${tableWidth}`
-            : `minWidth: ${tableMinWidth}`,
-        }),
-        colgroup,
-        ["tbody", 0],
-      ],
+      "table",
+      tableAttributes,
+      ...(layoutMode === "fixed"
+        ? [colgroup]
+        : autoWidths.length
+          ? [autoColgroup]
+          : []),
+      ["tbody", 0],
     ];
 
-    return table;
-  },
-
-  onTransaction() {
-    editor = this.editor;
+    return [
+      "div",
+      {
+        class: "halo-table-wrapper",
+        "data-table-layout": layoutMode,
+        style: joinStyles(
+          "box-sizing: border-box; overflow-x: auto; overflow-y: hidden; width: 100%; max-width: 100%; min-width: 0",
+          indent ? (HTMLAttributes.style as string | undefined) : undefined
+        ),
+      },
+      table,
+    ];
   },
 }).configure({ resizable: true });
 
-export default Table;
+export function getTableBubbleMenuVirtualElement(editor: Editor) {
+  const parentNode = findParentNode((node) => node.type.name === "table")(
+    editor.state.selection
+  );
+  if (!parentNode) {
+    return null;
+  }
+
+  const nodeDom = editor.view.nodeDOM(parentNode.pos);
+  const nodeElement =
+    nodeDom instanceof Element
+      ? nodeDom
+      : nodeDom instanceof Node
+        ? nodeDom.parentElement
+        : null;
+  const wrapper = nodeElement?.matches(".halo-table-wrapper")
+    ? nodeElement
+    : nodeElement?.closest<HTMLElement>(".halo-table-wrapper");
+
+  if (wrapper instanceof HTMLElement) {
+    return {
+      contextElement: wrapper,
+      getBoundingClientRect: () => wrapper.getBoundingClientRect(),
+      getClientRects: () => [wrapper.getBoundingClientRect()],
+    };
+  }
+
+  const domRect = posToDOMRect(
+    editor.view,
+    parentNode.start,
+    parentNode.start + parentNode.node.nodeSize - 2
+  );
+  return {
+    getBoundingClientRect: () => domRect,
+    getClientRects: () => [domRect],
+  };
+}
+
+export function transformPastedTableHTML(html: string) {
+  // Only sanitize markup that actually contains a table; leave other
+  // pasted HTML (e.g. iframe embeds) to their own extensions.
+  if (!/<table[\s>]/i.test(html)) {
+    return html;
+  }
+  return sanitizePastedTableHTML(html);
+}
+
+export function sanitizePastedTableHTML(html: string) {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  document
+    .querySelectorAll("script, style, iframe, object, embed, link, meta")
+    .forEach((element) => element.remove());
+  document.querySelectorAll<HTMLElement>("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      if (
+        attribute.name.toLowerCase().startsWith("on") ||
+        ((attribute.name === "href" || attribute.name === "src") &&
+          /^\s*javascript:/i.test(attribute.value))
+      ) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+  return document.body.innerHTML;
+}
+
+function handleTabSeparatedPaste(view: EditorView, event: ClipboardEvent) {
+  const clipboard = event.clipboardData;
+  const html = clipboard?.getData("text/html");
+  const text = clipboard?.getData("text/plain");
+  if (html || !text?.includes("\t")) {
+    return false;
+  }
+
+  // Don't hijack pastes that belong to code blocks: pasting into an
+  // existing code block, or code copied from VSCode (handled by the
+  // code block extension's own paste plugin).
+  if (view.state.selection.$from.parent.type.spec.code) {
+    return false;
+  }
+  if (clipboard?.getData("vscode-editor-data")) {
+    return false;
+  }
+
+  const values = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n$/, "")
+    .split("\n")
+    .map((row) => row.split("\t"));
+  const columnCount = Math.max(...values.map((row) => row.length));
+  if (!values.length || !columnCount) {
+    return false;
+  }
+
+  const { schema } = view.state;
+  const rowType = schema.nodes.tableRow;
+  const cellType = schema.nodes.tableCell;
+  const paragraphType = schema.nodes.paragraph;
+  const tableType = schema.nodes.table;
+  if (!rowType || !cellType || !paragraphType || !tableType) {
+    return false;
+  }
+
+  const rows = values.map((row) =>
+    rowType.create(
+      null,
+      Array.from({ length: columnCount }, (_, columnIndex) => {
+        const value = row[columnIndex] ?? "";
+        const paragraph = paragraphType.create(
+          null,
+          value ? schema.text(value) : undefined
+        );
+        return cellType.create(null, paragraph);
+      })
+    )
+  );
+  const slice = new Slice(Fragment.from(rows), 0, 0);
+
+  if (handlePastedTableCells(view, slice)) {
+    event.preventDefault();
+    return true;
+  }
+
+  const table = tableType.create({ layoutMode: "auto" }, rows);
+  view.dispatch(view.state.tr.replaceSelectionWith(table).scrollIntoView());
+  event.preventDefault();
+  return true;
+}

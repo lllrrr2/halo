@@ -22,7 +22,7 @@ import run.halo.app.core.extension.Plugin;
  * @since 2.0.0
  */
 @Slf4j
-public class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
+class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
 
     private final YamlPluginFinder yamlPluginFinder;
 
@@ -32,9 +32,7 @@ public class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
 
     @Override
     public boolean isApplicable(Path pluginPath) {
-        return Files.exists(pluginPath)
-            && (Files.isDirectory(pluginPath)
-            || FileUtils.isJarFile(pluginPath));
+        return Files.exists(pluginPath) && (Files.isDirectory(pluginPath) || FileUtils.isJarFile(pluginPath));
     }
 
     @Override
@@ -44,13 +42,13 @@ public class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
     }
 
     public static PluginDescriptor convert(Plugin plugin) {
-        String pluginId = plugin.getMetadata().getName();
-        Plugin.PluginSpec spec = plugin.getSpec();
-        Plugin.PluginAuthor author = spec.getAuthor();
-        String provider = (author == null ? StringUtils.EMPTY : author.getName());
+        var pluginId = plugin.getMetadata().getName();
+        var spec = plugin.getSpec();
+        var author = spec.getAuthor();
+        var provider = (author == null ? StringUtils.EMPTY : author.getName());
 
-        DefaultPluginDescriptor defaultPluginDescriptor =
-            new DefaultPluginDescriptor(pluginId,
+        var defaultPluginDescriptor = new DefaultPluginDescriptor(
+                pluginId,
                 spec.getDescription(),
                 BasePlugin.class.getName(),
                 spec.getVersion(),
@@ -59,8 +57,7 @@ public class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
                 joinLicense(spec.getLicense()));
         // add dependencies
         spec.getPluginDependencies().forEach((pluginDepName, versionRequire) -> {
-            PluginDependency dependency =
-                new PluginDependency(String.format("%s@%s", pluginDepName, versionRequire));
+            PluginDependency dependency = new PluginDependency(String.format("%s@%s", pluginDepName, versionRequire));
             defaultPluginDescriptor.addDependency(dependency);
         });
         return defaultPluginDescriptor;
@@ -70,8 +67,6 @@ public class YamlPluginDescriptorFinder implements PluginDescriptorFinder {
         if (CollectionUtils.isEmpty(licenses)) {
             return StringUtils.EMPTY;
         }
-        return licenses.stream()
-            .map(Plugin.License::getName)
-            .collect(Collectors.joining(","));
+        return licenses.stream().map(Plugin.License::getName).collect(Collectors.joining(","));
     }
 }

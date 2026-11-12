@@ -1,20 +1,154 @@
-import path from "path";
-import { loadEnv, Plugin } from "vite";
-import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
-import { createViteConfig } from "./src/vite/config-builder";
+import fs from "node:fs";
+import path, { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import VueI18n from "@intlify/unplugin-vue-i18n/vite";
+import Vue from "@vitejs/plugin-vue";
+import VueJsx from "@vitejs/plugin-vue-jsx";
+import Gzip from "rollup-plugin-gzip";
+import Icons from "unplugin-icons/vite";
+import { defineConfig } from "vite-plus";
+import { configDefaults } from "vite-plus";
+import { setupLibraryExternal } from "./src/vite/library-external.ts";
+import { devPlugin } from "./src/vite/plugin-dev.ts";
 
-export default ({ mode }: { mode: string }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  return createViteConfig({
-    base: env.VITE_BASE_URL,
-    entryFile: "/console-src/main.ts",
-    port: 3000,
-    outDir: path.resolve("build/dist/console"),
-    mode,
-    plugins: [
-      VueI18nPlugin({
-        include: [path.resolve(__dirname, "./src/locales/*.yaml")],
-      }) as Plugin,
+const DEV_SERVER_PORT = 3000;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig(({ command, mode }) => ({
+  run: {
+    tasks: {
+      "app:dev": {
+        command: "vp dev . --host",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+      "app:build": {
+        command: "vp build",
+        dependsOn: ["build:packages"],
+      },
+      "app:test:unit": {
+        command:
+          "vp test --run && vp run --parallel --filter @halo-dev/* test:unit",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+      "app:test:unit:watch": {
+        command: "vp test --watch",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+      "app:test:unit:ui": {
+        command: "vp test --watch --ui",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+      "app:typecheck": {
+        command:
+          "vue-tsc --noEmit -p tsconfig.app.json --composite false && vp run --parallel --filter @halo-dev/* typecheck",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+      "app:lint": {
+        command:
+          "eslint . --max-warnings=0 -f html -o build/lint-result/index.html",
+        dependsOn: ["build:packages"],
+        cache: false,
+      },
+    },
+  },
+  plugins: [
+    Vue(),
+    VueJsx(),
+    Gzip(),
+    Icons({
+      compiler: "vue3",
+      customCollections: {
+        core: {
+          logo: () => fs.readFileSync("./src/assets/logo.svg", "utf-8"),
+        },
+      },
+    }),
+    VueI18n({
+      include: [path.resolve(__dirname, "./src/locales/*.json")],
+    }),
+    setupLibraryExternal(mode === "test" ? "test" : command, DEV_SERVER_PORT),
+    devPlugin({ port: DEV_SERVER_PORT }),
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+      "@console": path.resolve(__dirname, "console-src"),
+      "@uc": path.resolve(__dirname, "uc-src"),
+    },
+  },
+  server: {
+    port: DEV_SERVER_PORT,
+    fs: {
+      strict: command === "build",
+    },
+  },
+  build: {
+    outDir: path.resolve(__dirname, "build/dist/ui"),
+    emptyOutDir: true,
+    assetsDir: "ui-assets",
+    rolldownOptions: {
+      input: {
+        console: resolve(import.meta.dirname, "console.html"),
+        uc: resolve(import.meta.dirname, "uc.html"),
+      },
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor",
+              test: /node_modules/,
+              entriesAware: true,
+              entriesAwareMergeThreshold: 28000, // bytes
+            },
+          ],
+        },
+      },
+    },
+  },
+  test: {
+    // Vitest v4 compatibility: preserve mock call history.
+    // Remove after tests no longer rely on calls from setup or earlier tests.
+    // https://viteplus.dev/guide/vitest-v5#remove-unneeded-compatibility-settings
+    // https://vitest.dev/guide/migration/#clearmocks-is-enabled-by-default
+    clearMocks: false,
+    environment: "jsdom",
+    include: ["**/*.spec.ts"],
+    root: fileURLToPath(new URL("./", import.meta.url)),
+    exclude: [...configDefaults.exclude, "./packages/**/*.ts"],
+    reporters: [["html", { outputDir: "build/test-result" }]],
+  },
+  fmt: {
+    sortTailwindcss: {},
+    sortImports: {
+      newlinesBetween: false,
+    },
+    trailingComma: "es5",
+    printWidth: 80,
+    sortPackageJson: true,
+    tabWidth: 2,
+    useTabs: false,
+    insertFinalNewline: true,
+    ignorePatterns: [
+      "packages/api-client/src",
+      "docs",
+      "**/dist/**",
+      "build/**",
+      "storybook-static",
+      ".idea",
     ],
-  });
-};
+    overrides: [
+      {
+        files: ["**/*.html"],
+        options: {
+          printWidth: 120,
+        },
+      },
+    ],
+  },
+}));

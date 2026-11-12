@@ -1,29 +1,21 @@
 <script lang="ts" setup>
-import { VButton, VModal, VTabbar } from "@halo-dev/components";
 import type { Plugin } from "@halo-dev/api-client";
+import { VButton, VLoading, VModal, VTabbar } from "@halo-dev/components";
+import { utils, type PluginInstallationTab } from "@halo-dev/ui-shared";
 import {
   computed,
-  markRaw,
-  nextTick,
+  defineAsyncComponent,
   onMounted,
   provide,
-  type Ref,
   ref,
+  shallowRef,
   toRefs,
+  type Ref,
 } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouteQuery } from "@vueuse/router";
-import LocalUpload from "./installation-tabs/LocalUpload.vue";
-import RemoteDownload from "./installation-tabs/RemoteDownload.vue";
-import type {
-  PluginInstallationTab,
-  PluginModule,
-} from "@halo-dev/console-shared";
 import { usePluginModuleStore } from "@/stores/plugin";
-import { usePermission } from "@/utils/permission";
 
 const { t } = useI18n();
-const { currentUserHasPermission } = usePermission();
 
 const props = withDefaults(
   defineProps<{
@@ -41,19 +33,25 @@ const emit = defineEmits<{
 const { pluginToUpgrade } = toRefs(props);
 provide<Ref<Plugin | undefined>>("pluginToUpgrade", pluginToUpgrade);
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
-const tabs = ref<PluginInstallationTab[]>([
+const tabs = shallowRef<PluginInstallationTab[]>([
   {
     id: "local",
     label: t("core.plugin.upload_modal.tabs.local"),
-    component: markRaw(LocalUpload),
+    component: defineAsyncComponent({
+      loader: () => import("./installation-tabs/LocalUpload.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 10,
   },
   {
     id: "remote",
     label: t("core.plugin.upload_modal.tabs.remote.title"),
-    component: markRaw(RemoteDownload),
+    component: defineAsyncComponent({
+      loader: () => import("./installation-tabs/RemoteDownload.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 20,
   },
 ]);
@@ -68,37 +66,29 @@ const modalTitle = computed(() => {
     : t("core.plugin.upload_modal.titles.install");
 });
 
-// handle remote download url from route
-const routeRemoteDownloadUrl = useRouteQuery<string | null>(
-  "remote-download-url"
-);
-
-onMounted(() => {
-  if (routeRemoteDownloadUrl.value) {
-    nextTick(() => {
-      activeTabId.value = "remote";
-    });
-  }
-});
-
 const { pluginModules } = usePluginModuleStore();
-onMounted(() => {
-  pluginModules.forEach((pluginModule: PluginModule) => {
-    const { extensionPoints } = pluginModule;
-    if (!extensionPoints?.["plugin:installation:tabs:create"]) {
-      return;
+
+onMounted(async () => {
+  for (const pluginModule of pluginModules) {
+    try {
+      const callbackFunction =
+        pluginModule?.extensionPoints?.["plugin:installation:tabs:create"];
+
+      if (typeof callbackFunction !== "function") {
+        continue;
+      }
+
+      const items = await callbackFunction();
+
+      tabs.value.push(
+        ...items.filter((item) => {
+          return utils.permission.has(item.permissions || []);
+        })
+      );
+    } catch (error) {
+      console.error(`Error processing plugin module:`, pluginModule, error);
     }
-
-    let items = extensionPoints[
-      "plugin:installation:tabs:create"
-    ]() as PluginInstallationTab[];
-
-    items = items.filter((item) => {
-      return currentUserHasPermission(item.permissions);
-    });
-
-    tabs.value.push(...items);
-  });
+  }
 
   tabs.value.sort((a, b) => {
     return a.priority - b.priority;
@@ -131,12 +121,12 @@ onMounted(() => {
           :is="tab.component"
           v-bind="tab.props"
           v-if="tab.id === activeTabId"
-          @close-modal="modal.close()"
+          @close-modal="modal?.close()"
         />
       </template>
     </div>
     <template #footer>
-      <VButton @click="modal.close()">
+      <VButton @click="modal?.close()">
         {{ $t("core.common.buttons.close") }}
       </VButton>
     </template>

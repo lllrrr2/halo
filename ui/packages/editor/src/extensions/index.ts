@@ -1,156 +1,52 @@
-// Tiptap official extensions
-import ExtensionHistory from "./history";
-import ExtensionHeading from "./heading";
-import ExtensionBold from "./bold";
-import ExtensionItalic from "./italic";
-import ExtensionStrike from "./strike";
-import ExtensionUnderline from "./underline";
-import ExtensionHighlight from "./highlight";
-import ExtensionBlockquote from "./blockquote";
-import ExtensionCode from "./code";
-import ExtensionSuperscript from "./superscript";
-import ExtensionSubscript from "./subscript";
-import ExtensionBulletList from "./bullet-list";
-import ExtensionOrderedList from "./ordered-list";
-import ExtensionTaskList from "./task-list";
-import ExtensionListKeymap from "./list-keymap";
-import ExtensionTable from "./table";
-import ExtensionTextAlign from "./text-align";
-import ExtensionTextStyle from "@tiptap/extension-text-style";
-import ExtensionLink from "./link";
-import ExtensionColor from "./color";
-import ExtensionFontSize from "./font-size";
-import ExtensionDropcursor from "@tiptap/extension-dropcursor";
-import ExtensionGapcursor from "@tiptap/extension-gapcursor";
-import ExtensionHardBreak from "@tiptap/extension-hard-break";
-import ExtensionHorizontalRule from "@tiptap/extension-horizontal-rule";
-import ExtensionDocument from "@tiptap/extension-document";
-import ExtensionParagraph from "./paragraph";
-import ExtensionPlaceholder from "@tiptap/extension-placeholder";
-import { i18n } from "@/locales";
+export * from "./extensions-kit";
 
-// Custom extensions
-import { ExtensionCommands } from "../extensions/commands-menu";
-import { ExtensionCodeBlock, lowlight } from "@/extensions/code-block";
-import ExtensionIframe from "./iframe";
-import ExtensionVideo from "./video";
-import ExtensionAudio from "./audio";
-import ExtensionImage from "./image";
-import ExtensionIndent from "./indent";
-import { ExtensionColumns, ExtensionColumn } from "./columns";
-import ExtensionText from "./text";
-import ExtensionDraggable from "./draggable";
-import ExtensionNodeSelected from "./node-selected";
-import ExtensionTrailingNode from "./trailing-node";
-import ExtensionSearchAndReplace from "./search-and-replace";
-import ExtensionClearFormat from "./clear-format";
-import ExtensionFormatBrush from "./format-brush";
-
-const allExtensions = [
-  ExtensionBlockquote,
-  ExtensionBold,
-  ExtensionBulletList,
-  ExtensionCode,
-  ExtensionDocument,
-  ExtensionDropcursor.configure({
-    width: 2,
-    class: "dropcursor",
-    color: "skyblue",
-  }),
-  ExtensionGapcursor,
-  ExtensionHardBreak,
-  ExtensionHeading,
-  ExtensionHistory,
-  ExtensionHorizontalRule,
-  ExtensionItalic,
-  ExtensionOrderedList,
-  ExtensionStrike,
-  ExtensionText,
-  ExtensionImage,
-  ExtensionTaskList,
-  ExtensionHighlight,
-  ExtensionColor,
-  ExtensionFontSize,
-  ExtensionLink.configure({
-    autolink: true,
-    openOnClick: false,
-  }),
-  ExtensionTextAlign.configure({
-    types: ["heading", "paragraph"],
-  }),
-  ExtensionUnderline,
-  ExtensionTable.configure({
-    resizable: true,
-  }),
-  ExtensionSubscript,
-  ExtensionSuperscript,
-  ExtensionPlaceholder.configure({
-    placeholder: i18n.global.t("editor.extensions.commands_menu.placeholder"),
-  }),
-  ExtensionCommands.configure({
-    suggestion: {},
-  }),
-  ExtensionCodeBlock.configure({
-    lowlight,
-  }),
-  ExtensionIframe,
-  ExtensionVideo,
-  ExtensionAudio,
-  ExtensionIndent,
-  ExtensionColumns,
-  ExtensionColumn,
-  ExtensionNodeSelected,
-  ExtensionTrailingNode,
-  ExtensionSearchAndReplace,
-  ExtensionClearFormat,
-  ExtensionFormatBrush,
-];
-
-export {
-  allExtensions,
-  ExtensionBlockquote,
-  ExtensionBold,
-  ExtensionBulletList,
-  ExtensionCode,
-  ExtensionDocument,
-  ExtensionDropcursor,
-  ExtensionGapcursor,
-  ExtensionHardBreak,
-  ExtensionHeading,
-  ExtensionHistory,
-  ExtensionHorizontalRule,
-  ExtensionItalic,
-  ExtensionOrderedList,
-  ExtensionStrike,
-  ExtensionText,
-  ExtensionImage,
-  ExtensionTaskList,
-  ExtensionLink,
-  ExtensionTextAlign,
-  ExtensionTextStyle,
-  ExtensionUnderline,
-  ExtensionTable,
-  ExtensionSubscript,
-  ExtensionSuperscript,
-  ExtensionParagraph,
-  ExtensionPlaceholder,
-  ExtensionHighlight,
-  ExtensionCommands,
-  ExtensionCodeBlock,
-  lowlight,
-  ExtensionIframe,
-  ExtensionVideo,
-  ExtensionAudio,
-  ExtensionColor,
-  ExtensionFontSize,
-  ExtensionIndent,
-  ExtensionDraggable,
-  ExtensionColumns,
-  ExtensionColumn,
-  ExtensionNodeSelected,
-  ExtensionTrailingNode,
-  ExtensionListKeymap,
-  ExtensionSearchAndReplace,
-  ExtensionClearFormat,
-  ExtensionFormatBrush,
-};
+export * from "./audio";
+export * from "./blockquote";
+export * from "./bold";
+export * from "./bullet-list";
+export * from "./character-count";
+export * from "./clear-format";
+export * from "./code";
+export * from "./code-block";
+export * from "./color";
+export * from "./columns";
+export * from "./commands-menu";
+export * from "./details";
+export * from "./document";
+export * from "./drop-cursor";
+export * from "./figure";
+export * from "./font-size";
+export * from "./format-brush";
+export * from "./gallery";
+export * from "./gap-cursor";
+export * from "./hard-break";
+export * from "./heading";
+export * from "./highlight";
+export * from "./history";
+export * from "./horizontal-rule";
+export * from "./iframe";
+export * from "./image";
+export * from "./indent";
+export * from "./italic";
+export * from "./keyboard-shortcuts";
+export * from "./link";
+export * from "./list-keymap";
+export * from "./node-selected";
+export * from "./ordered-list";
+export * from "./paragraph";
+export * from "./placeholder";
+export * from "./range-selection";
+export * from "./search-and-replace";
+export * from "./smart-scroll";
+export * from "./strike";
+export * from "./subscript";
+export * from "./superscript";
+export * from "./table";
+export * from "./task-list";
+export * from "./text";
+export * from "./text-align";
+export * from "./text-style";
+export * from "./trailing-node";
+export * from "./underline";
+export * from "./upload";
+export * from "./video";

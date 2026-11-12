@@ -1,20 +1,18 @@
-import type { App } from "vue";
 import {
   VueQueryPlugin,
   type VueQueryPluginOptions,
 } from "@tanstack/vue-query";
-
-const networkMode = import.meta.env.PROD ? "online" : "always";
+import type { App } from "vue";
 
 const options: VueQueryPluginOptions = {
   queryClientConfig: {
     defaultOptions: {
       queries: {
         refetchOnWindowFocus: false,
-        networkMode,
+        networkMode: "always",
       },
       mutations: {
-        networkMode,
+        networkMode: "always",
       },
     },
   },

@@ -1,26 +1,32 @@
 package run.halo.app.notification;
 
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URL;
+import java.util.HashMap;
 import java.util.Map;
+import org.jsoup.Jsoup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ClassPathResource;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import run.halo.app.core.extension.notification.NotificationTemplate;
 import run.halo.app.infra.ExternalUrlSupplier;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
+import run.halo.app.infra.utils.JsonUtils;
+import run.halo.app.infra.utils.YamlUnstructuredLoader;
 
 /**
  * Tests for {@link DefaultNotificationTemplateRender}.
@@ -32,7 +38,7 @@ import run.halo.app.infra.SystemSetting;
 class DefaultNotificationTemplateRenderTest {
 
     @Mock
-    private SystemConfigurableEnvironmentFetcher environmentFetcher;
+    private SystemConfigFetcher environmentFetcher;
 
     @Mock
     private ExternalUrlSupplier externalUrlSupplier;
@@ -54,7 +60,7 @@ class DefaultNotificationTemplateRenderTest {
 
               [(${replier})] 在评论“[(${isQuoteReply ? quoteContent : commentContent})]”中回复了您，
               以下是回复的具体内容：
-              
+
               [(${content})]
 
             [(${site.title})]
@@ -63,42 +69,110 @@ class DefaultNotificationTemplateRenderTest {
             查看原文：[(${commentSubjectUrl})]
             """;
         final var model = Map.<String, Object>of(
-            "replier", "guqing",
-            "isQuoteReply", true,
-            "quoteContent", "这是引用的内容",
-            "commentContent", "这是评论的内容",
-            "commentSubjectUrl", "/archives/1",
-            "content", "这是回复的内容"
-        );
+                "replier", "guqing",
+                "isQuoteReply", true,
+                "quoteContent", "这是引用的内容",
+                "commentContent", "这是评论的内容",
+                "commentSubjectUrl", "/archives/1",
+                "content", "这是回复的内容");
 
         var basic = new SystemSetting.Basic();
         basic.setTitle("Halo");
         basic.setLogo("https://halo.run/logo");
         basic.setSubtitle("Halo");
         when(environmentFetcher.fetch(eq(SystemSetting.Basic.GROUP), eq(SystemSetting.Basic.class)))
-            .thenReturn(Mono.just(basic));
+                .thenReturn(Mono.just(basic));
 
-        templateRender.render(template, model)
-            .as(StepVerifier::create)
-            .consumeNextWith(render -> {
-                assertThat(render).isEqualTo("""
+        templateRender
+                .render(template, model)
+                .as(StepVerifier::create)
+                .consumeNextWith(render -> {
+                    assertThat(render).isEqualTo("""
                     亲爱的博主
 
                       guqing 在评论“这是引用的内容”中回复了您，
                       以下是回复的具体内容：
-                      
+
                       这是回复的内容
-   
+
                     Halo
                     http://localhost:8090
                     祝好！
                     查看原文：/archives/1
                     """);
-            })
-            .verifyComplete();
+                })
+                .verifyComplete();
 
-        verify(environmentFetcher).fetch(eq(SystemSetting.Basic.GROUP),
-            eq(SystemSetting.Basic.class));
+        verify(environmentFetcher).fetch(eq(SystemSetting.Basic.GROUP), eq(SystemSetting.Basic.class));
         verify(externalUrlSupplier).getRaw();
+    }
+
+    @Test
+    void siteUrlTest() throws MalformedURLException {
+        when(environmentFetcher.fetch(eq(SystemSetting.Basic.GROUP), eq(SystemSetting.Basic.class)))
+                .thenReturn(Mono.just(new SystemSetting.Basic()));
+
+        var template = "<a th:href=\"|${site.url}/uc/notifications|\">查看通知</a>";
+        var expected = "<a href=\"http://localhost:8090/uc/notifications\">查看通知</a>";
+
+        when(externalUrlSupplier.getRaw()).thenReturn(new URL("http://localhost:8090/"));
+        templateRender
+                .render(template, Map.of())
+                .as(StepVerifier::create)
+                .expectNext(expected)
+                .verifyComplete();
+
+        when(externalUrlSupplier.getRaw()).thenReturn(new URL("http://localhost:8090"));
+        templateRender
+                .render(template, Map.of())
+                .as(StepVerifier::create)
+                .expectNext(expected)
+                .verifyComplete();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "template-new-comment-on-post, commentUrl, true",
+        "template-new-comment-on-post, commentUrl, false",
+        "template-new-comment-on-single-page, commentUrl, true",
+        "template-new-comment-on-single-page, commentUrl, false",
+        "template-someone-replied-to-you, replyUrl, true",
+        "template-someone-replied-to-you, replyUrl, false"
+    })
+    void defaultCommentTemplatesKeepSourceLinksAndOptionallyLinkTargets(
+            String name, String attribute, boolean available) {
+        var resource = new YamlUnstructuredLoader(new ClassPathResource("extensions/notification-templates.yaml"))
+                .load().stream()
+                        .filter(item -> name.equals(item.getMetadata().getName()))
+                        .findFirst()
+                        .orElseThrow();
+        var template = JsonUtils.jsonToObject(JsonUtils.objectToJson(resource), NotificationTemplate.class)
+                .getSpec()
+                .getTemplate();
+        var model = new HashMap<String, Object>();
+        model.put("subscriber", Map.of("displayName", "Reader"));
+        for (var key :
+                new String[] {"postTitle", "pageTitle", "commentSubjectTitle", "commenter", "replier", "commentContent"
+                }) {
+            model.put(key, "Example");
+        }
+        model.put("content", "<p>New content</p>");
+        model.put("isQuoteReply", false);
+        for (var key : new String[] {"postUrl", "pageUrl", "commentSubjectUrl"}) {
+            model.put(key, "https://example.test/post");
+        }
+        var target = "https://example.test/post#halo-comment=comment-a&reply=reply-b";
+        if (available) {
+            model.put(attribute, target);
+        }
+        when(environmentFetcher.fetch(SystemSetting.Basic.GROUP, SystemSetting.Basic.class))
+                .thenReturn(Mono.empty());
+        var html =
+                Jsoup.parse(templateRender.render(template.getHtmlBody(), model).block());
+        assertThat(html.select("a").eachAttr("href")).contains("https://example.test/post");
+        assertThat(html.select("a").eachAttr("href").contains(target)).isEqualTo(available);
+        var text = templateRender.render(template.getRawBody(), model).block();
+        assertThat(text.contains(target)).isEqualTo(available);
+        assertThat(text).doesNotContain("null");
     }
 }

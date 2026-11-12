@@ -1,0 +1,279 @@
+package run.halo.app.core.endpoint.theme;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterConfig;
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+import java.time.Duration;
+import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Sort;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Mono;
+import run.halo.app.content.comment.CommentRequest;
+import run.halo.app.content.comment.CommentService;
+import run.halo.app.content.comment.ReplyRequest;
+import run.halo.app.content.comment.ReplyService;
+import run.halo.app.core.extension.content.Comment;
+import run.halo.app.core.extension.content.Reply;
+import run.halo.app.extension.ListResult;
+import run.halo.app.extension.PageRequest;
+import run.halo.app.extension.Ref;
+import run.halo.app.infra.SystemConfigFetcher;
+import run.halo.app.theme.finders.CommentFinder;
+import run.halo.app.theme.finders.CommentPublicQueryService;
+import run.halo.app.theme.finders.vo.CommentVo;
+import run.halo.app.theme.finders.vo.ReplyVo;
+
+/**
+ * Tests for {@link CommentFinderEndpoint}.
+ *
+ * @author guqing
+ * @since 2.0.0
+ */
+@ExtendWith(MockitoExtension.class)
+class CommentFinderEndpointTest {
+    @Mock
+    private CommentFinder commentFinder;
+
+    @Mock
+    private CommentPublicQueryService commentPublicQueryService;
+
+    @Mock
+    private CommentService commentService;
+
+    @Mock
+    private SystemConfigFetcher environmentFetcher;
+
+    @Mock
+    private ReplyService replyService;
+
+    @Mock
+    private RateLimiterRegistry rateLimiterRegistry;
+
+    @InjectMocks
+    private CommentFinderEndpoint commentFinderEndpoint;
+
+    private WebTestClient webTestClient;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(environmentFetcher.fetchComment()).thenReturn(Mono.empty());
+        webTestClient = WebTestClient.bindToRouterFunction(commentFinderEndpoint.endpoint())
+                .build();
+    }
+
+    @Test
+    void getReplyReturnsPrivateUncachedDisplayOrNotFound() {
+        when(commentPublicQueryService.getReply("comment-a", "reply-b"))
+                .thenReturn(Mono.just(ReplyVo.builder()
+                        .permalink("/post#halo-comment=comment-a&reply=reply-b")
+                        .build()))
+                .thenReturn(Mono.empty());
+        webTestClient
+                .get()
+                .uri("/comments/comment-a/reply/reply-b")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectHeader()
+                .valueEquals("Cache-Control", "no-store, private")
+                .expectHeader()
+                .value("Vary", value -> assertThat(value).contains("Cookie", "Authorization"))
+                .expectBody()
+                .jsonPath("$.permalink")
+                .isEqualTo("/post#halo-comment=comment-a&reply=reply-b");
+        webTestClient
+                .get()
+                .uri("/comments/comment-a/reply/reply-b")
+                .exchange()
+                .expectStatus()
+                .isNotFound()
+                .expectHeader()
+                .valueEquals("Cache-Control", "no-store, private")
+                .expectHeader()
+                .value("Vary", value -> assertThat(value).contains("Cookie", "Authorization"));
+    }
+
+    @Test
+    void getReplyDoesNotHideServiceFailuresAsNotFound() {
+        when(commentPublicQueryService.getReply("comment-a", "reply-b"))
+                .thenReturn(Mono.error(new IllegalStateException("storage failure")));
+        webTestClient
+                .get()
+                .uri("/comments/comment-a/reply/reply-b")
+                .exchange()
+                .expectStatus()
+                .is5xxServerError();
+    }
+
+    @Test
+    void listComments() {
+        when(commentPublicQueryService.list(any(), any(PageRequest.class)))
+                .thenReturn(Mono.just(new ListResult<>(1, 10, 0, List.of())));
+
+        Ref ref = new Ref();
+        ref.setGroup("content.halo.run");
+        ref.setVersion("v1alpha1");
+        ref.setKind("Post");
+        ref.setName("test");
+        webTestClient
+                .get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/comments")
+                        .queryParam("group", ref.getGroup())
+                        .queryParam("version", ref.getVersion())
+                        .queryParam("kind", ref.getKind())
+                        .queryParam("name", ref.getName())
+                        .queryParam("page", 1)
+                        .queryParam("size", 10)
+                        .build())
+                .exchange()
+                .expectStatus()
+                .isOk();
+        ArgumentCaptor<Ref> refCaptor = ArgumentCaptor.forClass(Ref.class);
+        verify(commentPublicQueryService, times(1)).list(refCaptor.capture(), any(PageRequest.class));
+        Ref value = refCaptor.getValue();
+        assertThat(value).isEqualTo(ref);
+    }
+
+    @Test
+    void listCommentsWithCreationTimestampSort() {
+        when(commentPublicQueryService.list(any(), any(PageRequest.class)))
+                .thenReturn(Mono.just(new ListResult<>(1, 10, 0, List.of())));
+
+        webTestClient
+                .get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/comments")
+                        .queryParam("kind", "Post")
+                        .queryParam("name", "test")
+                        .queryParam("sort", "creationTimestamp,desc")
+                        .build())
+                .exchange()
+                .expectStatus()
+                .isOk();
+
+        var pageRequestCaptor = ArgumentCaptor.forClass(PageRequest.class);
+        verify(commentPublicQueryService).list(any(), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getSort())
+                .isEqualTo(Sort.by(Sort.Order.desc("metadata.creationTimestamp")));
+    }
+
+    @Test
+    void getComment() {
+        var spec = new Comment.CommentSpec();
+        spec.setContent("Test comment content");
+        var comment = new CommentVo().setSpec(spec);
+        when(commentPublicQueryService.getByName(any())).thenReturn(Mono.just(comment));
+
+        webTestClient
+                .get()
+                .uri("/comments/test-comment")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody()
+                .jsonPath("$.spec.content")
+                .isEqualTo("Test comment content");
+
+        verify(commentPublicQueryService, times(1)).getByName(eq("test-comment"));
+    }
+
+    @Test
+    void listCommentReplies() {
+        when(commentPublicQueryService.listReply(any(), anyInt(), anyInt()))
+                .thenReturn(Mono.just(new ListResult<>(2, 20, 0, List.of())));
+
+        webTestClient
+                .get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/comments/test-comment/reply")
+                        .queryParam("page", 2)
+                        .queryParam("size", 20)
+                        .build())
+                .exchange()
+                .expectStatus()
+                .isOk();
+
+        verify(commentPublicQueryService, times(1)).listReply(eq("test-comment"), eq(2), eq(20));
+    }
+
+    @Test
+    void createComment() {
+        when(commentService.create(any())).thenReturn(Mono.empty());
+
+        RateLimiterConfig config = RateLimiterConfig.custom()
+                .limitForPeriod(10)
+                .limitRefreshPeriod(Duration.ofSeconds(1))
+                .timeoutDuration(Duration.ofSeconds(10))
+                .build();
+        RateLimiter rateLimiter = RateLimiter.of("comment-creation-from-ip-" + "0:0:0:0:0:0:0:0", config);
+        when(rateLimiterRegistry.rateLimiter(anyString(), anyString())).thenReturn(rateLimiter);
+
+        final CommentRequest commentRequest = new CommentRequest();
+        Ref ref = new Ref();
+        ref.setGroup("content.halo.run");
+        ref.setVersion("v1alpha1");
+        ref.setKind("Post");
+        ref.setName("test-post");
+        commentRequest.setSubjectRef(ref);
+        commentRequest.setContent("content");
+        commentRequest.setRaw("raw");
+        commentRequest.setAllowNotification(false);
+        webTestClient
+                .post()
+                .uri("/comments")
+                .bodyValue(commentRequest)
+                .exchange()
+                .expectStatus()
+                .isOk();
+
+        ArgumentCaptor<Comment> captor = ArgumentCaptor.forClass(Comment.class);
+        verify(commentService, times(1)).create(captor.capture());
+        Comment value = captor.getValue();
+        assertThat(value.getSpec().getIpAddress()).isNotNull();
+        assertThat(value.getSpec().getUserAgent()).isNotNull();
+        assertThat(value.getSpec().getSubjectRef()).isEqualTo(ref);
+    }
+
+    @Test
+    void createReply() {
+        when(replyService.create(any(), any())).thenReturn(Mono.empty());
+
+        final ReplyRequest replyRequest = new ReplyRequest();
+        replyRequest.setRaw("raw");
+        replyRequest.setContent("content");
+        replyRequest.setAllowNotification(true);
+
+        when(rateLimiterRegistry.rateLimiter("comment-creation-from-ip-127.0.0.1", "comment-creation"))
+                .thenReturn(RateLimiter.ofDefaults("comment-creation"));
+
+        webTestClient
+                .post()
+                .uri("/comments/test-comment/reply")
+                .header("X-Forwarded-For", "127.0.0.1")
+                .bodyValue(replyRequest)
+                .exchange()
+                .expectStatus()
+                .isOk();
+
+        ArgumentCaptor<Reply> captor = ArgumentCaptor.forClass(Reply.class);
+        verify(replyService, times(1)).create(eq("test-comment"), captor.capture());
+        Reply value = captor.getValue();
+        assertThat(value.getSpec().getIpAddress()).isNotNull();
+        assertThat(value.getSpec().getUserAgent()).isNotNull();
+        assertThat(value.getSpec().getQuoteReply()).isNull();
+
+        verify(rateLimiterRegistry).rateLimiter("comment-creation-from-ip-127.0.0.1", "comment-creation");
+    }
+}

@@ -4,8 +4,7 @@ import java.time.Clock;
 import java.util.HashMap;
 import java.util.Objects;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import run.halo.app.content.Content;
@@ -38,62 +37,55 @@ public class SnapshotServiceImpl implements SnapshotService {
         }
 
         return client.fetch(Snapshot.class, baseSnapshotName)
-            .filter(Snapshot::isBaseSnapshot)
-            .switchIfEmpty(Mono.error(() -> new IllegalArgumentException(
-                "The snapshot " + baseSnapshotName + " is not a base snapshot.")))
-            .flatMap(baseSnapshot ->
-                Mono.defer(() -> {
-                    if (Objects.equals(snapshotName, baseSnapshotName)) {
-                        return Mono.just(baseSnapshot);
-                    }
-                    return client.fetch(Snapshot.class, snapshotName);
-                }).doOnNext(snapshot -> {
-                    var baseRaw = baseSnapshot.getSpec().getRawPatch();
-                    var baseContent = baseSnapshot.getSpec().getContentPatch();
+                .filter(Snapshot::isBaseSnapshot)
+                .switchIfEmpty(Mono.error(() ->
+                        new IllegalArgumentException("The snapshot " + baseSnapshotName + " is not a base snapshot.")))
+                .flatMap(baseSnapshot -> Mono.defer(() -> {
+                            if (Objects.equals(snapshotName, baseSnapshotName)) {
+                                return Mono.just(baseSnapshot);
+                            }
+                            return client.fetch(Snapshot.class, snapshotName);
+                        })
+                        .doOnNext(snapshot -> {
+                            var baseRaw = baseSnapshot.getSpec().getRawPatch();
+                            var baseContent = baseSnapshot.getSpec().getContentPatch();
 
-                    var rawPatch = snapshot.getSpec().getRawPatch();
-                    var contentPatch = snapshot.getSpec().getContentPatch();
+                            var rawPatch = snapshot.getSpec().getRawPatch();
+                            var contentPatch = snapshot.getSpec().getContentPatch();
 
-                    var annotations = snapshot.getMetadata().getAnnotations();
-                    if (annotations == null) {
-                        annotations = new HashMap<>();
-                        snapshot.getMetadata().setAnnotations(annotations);
-                    }
+                            var annotations = snapshot.getMetadata().getAnnotations();
+                            if (annotations == null) {
+                                annotations = new HashMap<>();
+                                snapshot.getMetadata().setAnnotations(annotations);
+                            }
 
-                    String patchedContent = baseContent;
-                    String patchedRaw = baseRaw;
-                    if (!Objects.equals(snapshot, baseSnapshot)) {
-                        patchedContent = PatchUtils.applyPatch(baseContent, contentPatch);
-                        patchedRaw = PatchUtils.applyPatch(baseRaw, rawPatch);
-                    }
+                            String patchedContent = baseContent;
+                            String patchedRaw = baseRaw;
+                            if (!Objects.equals(snapshot, baseSnapshot)) {
+                                patchedContent = PatchUtils.applyPatch(baseContent, contentPatch);
+                                patchedRaw = PatchUtils.applyPatch(baseRaw, rawPatch);
+                            }
 
-                    annotations.put(Snapshot.PATCHED_CONTENT_ANNO, patchedContent);
-                    annotations.put(Snapshot.PATCHED_RAW_ANNO, patchedRaw);
-                })
-            );
+                            annotations.put(Snapshot.PATCHED_CONTENT_ANNO, patchedContent);
+                            annotations.put(Snapshot.PATCHED_RAW_ANNO, patchedRaw);
+                        }));
     }
 
     @Override
-    public Mono<Snapshot> patchAndCreate(@NonNull Snapshot snapshot,
-        @Nullable Snapshot baseSnapshot,
-        @NonNull Content content) {
+    public Mono<Snapshot> patchAndCreate(Snapshot snapshot, @Nullable Snapshot baseSnapshot, Content content) {
         return Mono.just(snapshot)
-            .doOnNext(s -> this.patch(s, baseSnapshot, content))
-            .flatMap(client::create);
+                .doOnNext(s -> this.patch(s, baseSnapshot, content))
+                .flatMap(client::create);
     }
 
     @Override
-    public Mono<Snapshot> patchAndUpdate(@NonNull Snapshot snapshot,
-        @NonNull Snapshot baseSnapshot,
-        @NonNull Content content) {
+    public Mono<Snapshot> patchAndUpdate(Snapshot snapshot, Snapshot baseSnapshot, Content content) {
         return Mono.just(snapshot)
-            .doOnNext(s -> this.patch(s, baseSnapshot, content))
-            .flatMap(client::update);
+                .doOnNext(s -> this.patch(s, baseSnapshot, content))
+                .flatMap(client::update);
     }
 
-    private void patch(@NonNull Snapshot snapshot,
-        @Nullable Snapshot baseSnapshot,
-        @NonNull Content content) {
+    private void patch(Snapshot snapshot, @Nullable Snapshot baseSnapshot, Content content) {
         var annotations = snapshot.getMetadata().getAnnotations();
         if (annotations != null) {
             annotations.remove(Snapshot.PATCHED_CONTENT_ANNO);

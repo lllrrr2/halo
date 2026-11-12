@@ -1,86 +1,99 @@
 <script lang="ts" setup>
+import type { ListedAuthProvider } from "@halo-dev/api-client";
 import {
-  VPageHeader,
+  AuthProviderSpecAuthTypeEnum,
+  consoleApiClient,
+} from "@halo-dev/api-client";
+import {
   IconLockPasswordLine,
-  VCard,
   VLoading,
+  VPageHeader,
 } from "@halo-dev/components";
 import { useQuery } from "@tanstack/vue-query";
-import { apiClient } from "@/utils/api-client";
-import type { ListedAuthProvider } from "@halo-dev/api-client";
-import AuthProviderListItem from "./components/AuthProviderListItem.vue";
-import { computed, ref } from "vue";
-import Fuse from "fuse.js";
+import { ref } from "vue";
+import AuthProvidersSection from "./components/AuthProvidersSection.vue";
 
-const {
-  data: authProviders,
-  isLoading,
-  refetch,
-} = useQuery<ListedAuthProvider[]>({
+const SYSTEM_CONFIGMAP_AUTH_PROVIDER = "authProvider";
+
+const formAuthProviders = ref<ListedAuthProvider[]>([]);
+const oauth2AuthProviders = ref<ListedAuthProvider[]>([]);
+
+const { isLoading, refetch } = useQuery<ListedAuthProvider[]>({
   queryKey: ["auth-providers"],
   queryFn: async () => {
-    const { data } = await apiClient.authProvider.listAuthProviders();
+    const { data } =
+      await consoleApiClient.auth.authProvider.listAuthProviders();
     return data;
   },
   onSuccess(data) {
-    fuse = new Fuse(data, {
-      keys: ["name", "displayName"],
-      useExtendedSearch: true,
-      threshold: 0.2,
-    });
+    formAuthProviders.value = data.filter(
+      (authProvider) =>
+        authProvider.authType === AuthProviderSpecAuthTypeEnum.Form
+    );
+    oauth2AuthProviders.value = data.filter(
+      (authProvider) =>
+        authProvider.authType === AuthProviderSpecAuthTypeEnum.Oauth2
+    );
   },
 });
 
-const keyword = ref("");
-let fuse: Fuse<ListedAuthProvider> | undefined = undefined;
+// Drag and drop
+const updating = ref(false);
 
-const searchResults = computed(() => {
-  if (!fuse || !keyword.value) {
-    return authProviders.value;
+async function onSortUpdate() {
+  try {
+    updating.value = true;
+
+    const allAuthProviders = [
+      ...formAuthProviders.value,
+      ...oauth2AuthProviders.value,
+    ].filter(Boolean);
+
+    await consoleApiClient.configMap.system.updateSystemConfigByGroup({
+      group: SYSTEM_CONFIGMAP_AUTH_PROVIDER,
+      body: {
+        states: allAuthProviders.map((authProvider, index) => {
+          return {
+            name: authProvider.name,
+            enabled: authProvider.enabled,
+            priority: index,
+          };
+        }),
+      },
+    });
+  } finally {
+    await refetch();
+    updating.value = false;
   }
-
-  return fuse?.search(keyword.value).map((item) => item.item);
-});
+}
 </script>
 
 <template>
   <VPageHeader :title="$t('core.identity_authentication.title')">
     <template #icon>
-      <IconLockPasswordLine class="mr-2 self-center" />
+      <IconLockPasswordLine />
     </template>
   </VPageHeader>
 
-  <div class="m-0 md:m-4">
-    <VCard :body-class="['!p-0']">
-      <template #header>
-        <div class="block w-full bg-gray-50 px-4 py-3">
-          <div
-            class="relative flex flex-col items-start sm:flex-row sm:items-center"
-          >
-            <div class="flex w-full flex-1 sm:w-auto">
-              <FormKit
-                v-model="keyword"
-                :placeholder="$t('core.common.placeholder.search')"
-                type="text"
-              ></FormKit>
-            </div>
-          </div>
-        </div>
-      </template>
-      <VLoading v-if="isLoading" />
-      <Transition v-else appear name="fade">
-        <ul
-          class="box-border h-full w-full divide-y divide-gray-100"
-          role="list"
-        >
-          <li v-for="(authProvider, index) in searchResults" :key="index">
-            <AuthProviderListItem
-              :auth-provider="authProvider"
-              @reload="refetch"
-            />
-          </li>
-        </ul>
-      </Transition>
-    </VCard>
+  <div class="m-0 space-y-5 md:m-4">
+    <VLoading v-if="isLoading" />
+    <TransitionGroup v-else appear name="fade">
+      <AuthProvidersSection
+        :key="AuthProviderSpecAuthTypeEnum.Form"
+        v-model="formAuthProviders"
+        :title="$t('core.identity_authentication.list.types.form')"
+        :loading="updating"
+        @update="onSortUpdate"
+      />
+
+      <AuthProvidersSection
+        v-if="oauth2AuthProviders.length"
+        :key="AuthProviderSpecAuthTypeEnum.Oauth2"
+        v-model="oauth2AuthProviders"
+        :title="$t('core.identity_authentication.list.types.oauth2')"
+        :loading="updating"
+        @update="onSortUpdate"
+      />
+    </TransitionGroup>
   </div>
 </template>

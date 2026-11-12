@@ -1,25 +1,45 @@
-import { apiClient } from "@/utils/api-client";
 import type { FormKitNode, FormKitTypeDefinition } from "@formkit/core";
-import { select, selects, defaultIcon } from "@formkit/inputs";
+import type { FormKitInputs } from "@formkit/inputs";
+import {
+  coreApiClient,
+  paginate,
+  type MenuItem,
+  type MenuItemV1alpha1ApiListMenuItemRequest,
+} from "@halo-dev/api-client";
+import { select } from "./select";
 
 function optionsHandler(node: FormKitNode) {
   node.on("created", async () => {
-    const { data } = await apiClient.extension.menuItem.listv1alpha1MenuItem({
+    const menuItems = await paginate<
+      MenuItemV1alpha1ApiListMenuItemRequest,
+      MenuItem
+    >((params) => coreApiClient.menuItem.listMenuItem(params), {
       fieldSelector: [`name=(${node.props.menuItems.join(",")})`],
     });
 
-    node.props.options = data.items.map((menuItem) => {
-      return {
-        value: menuItem.metadata.name,
-        label: menuItem.status?.displayName,
-      };
-    });
+    if (node.context) {
+      node.context.attrs.options = menuItems.map((menuItem) => {
+        return {
+          value: menuItem.metadata.name,
+          label: menuItem.status?.displayName,
+        };
+      });
+    }
   });
 }
 
 export const menuItemSelect: FormKitTypeDefinition = {
   ...select,
-  props: ["placeholder", "menuItems"],
+  props: ["menuItems", ...(select.props as string[])],
   forceTypeProp: "select",
-  features: [optionsHandler, selects, defaultIcon("select", "select")],
+  features: [optionsHandler],
 };
+
+declare module "@formkit/inputs" {
+  export interface FormKitInputProps<Props extends FormKitInputs<Props>> {
+    menuItemSelect: {
+      type: "menuItemSelect";
+      value?: string;
+    };
+  }
+}

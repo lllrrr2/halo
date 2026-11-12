@@ -1,5 +1,8 @@
 package run.halo.app.theme.finders.vo;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +22,7 @@ import run.halo.app.extension.MetadataOperator;
 @Builder
 public class MenuItemVo implements VisualizableTreeNode<MenuItemVo>, ExtensionVoOperator {
 
+    @Schema(requiredMode = REQUIRED)
     MetadataOperator metadata;
 
     MenuItem.MenuItemSpec spec;
@@ -29,14 +33,12 @@ public class MenuItemVo implements VisualizableTreeNode<MenuItemVo>, ExtensionVo
 
     String parentName;
 
-    /**
-     * Gets menu item's display name.
-     */
+    /** Gets menu item's display name. */
     public String getDisplayName() {
         if (status != null && StringUtils.isNotBlank(status.getDisplayName())) {
             return status.getDisplayName();
         }
-        return spec.getDisplayName();
+        return spec == null ? null : spec.getDisplayName();
     }
 
     /**
@@ -48,11 +50,13 @@ public class MenuItemVo implements VisualizableTreeNode<MenuItemVo>, ExtensionVo
     public static MenuItemVo from(MenuItem menuItem) {
         MenuItem.MenuItemStatus status = menuItem.getStatus();
         return MenuItemVo.builder()
-            .metadata(menuItem.getMetadata())
-            .spec(menuItem.getSpec())
-            .status(status)
-            .children(List.of())
-            .build();
+                .metadata(menuItem.getMetadata())
+                .spec(menuItem.getSpec())
+                .status(status)
+                .children(List.of())
+                .parentName(
+                        menuItem.getSpec() == null ? null : menuItem.getSpec().getParent())
+                .build();
     }
 
     @Override

@@ -2,13 +2,16 @@ package run.halo.app.infra.exception.handlers;
 
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.web.ErrorProperties;
 import org.springframework.boot.autoconfigure.web.WebProperties;
-import org.springframework.boot.autoconfigure.web.reactive.error.DefaultErrorWebExceptionHandler;
-import org.springframework.boot.web.reactive.error.ErrorAttributes;
+import org.springframework.boot.webflux.autoconfigure.error.DefaultErrorWebExceptionHandler;
+import org.springframework.boot.webflux.error.ErrorAttributes;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
+import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
@@ -18,6 +21,8 @@ import run.halo.app.theme.ThemeResolver;
 import run.halo.app.theme.engine.ThemeTemplateAvailabilityProvider;
 
 public class HaloErrorWebExceptionHandler extends DefaultErrorWebExceptionHandler {
+
+    private static final Logger logger = LoggerFactory.getLogger(HaloErrorWebExceptionHandler.class);
 
     private final ThemeTemplateAvailabilityProvider templateAvailabilityProvider;
 
@@ -33,13 +38,12 @@ public class HaloErrorWebExceptionHandler extends DefaultErrorWebExceptionHandle
      * @since 2.4.0
      */
     public HaloErrorWebExceptionHandler(
-        ErrorAttributes errorAttributes,
-        WebProperties.Resources resources,
-        ErrorProperties errorProperties,
-        ApplicationContext applicationContext) {
+            ErrorAttributes errorAttributes,
+            WebProperties.Resources resources,
+            ErrorProperties errorProperties,
+            ApplicationContext applicationContext) {
         super(errorAttributes, resources, errorProperties, applicationContext);
-        this.templateAvailabilityProvider =
-            applicationContext.getBean(ThemeTemplateAvailabilityProvider.class);
+        this.templateAvailabilityProvider = applicationContext.getBean(ThemeTemplateAvailabilityProvider.class);
         this.themeResolver = applicationContext.getBean(ThemeResolver.class);
     }
 
@@ -50,28 +54,43 @@ public class HaloErrorWebExceptionHandler extends DefaultErrorWebExceptionHandle
     }
 
     @Override
+    protected void logError(ServerRequest request, ServerResponse response, Throwable throwable) {
+        if (throwable instanceof WebExchangeBindException) {
+            if (logger.isDebugEnabled()) {
+                logger.debug(
+                        "Resolved [{}] for HTTP {} {}",
+                        throwable.getClass().getSimpleName(),
+                        request.method(),
+                        request.path());
+            }
+            return;
+        }
+        super.logError(request, response, throwable);
+    }
+
+    @Override
     protected Mono<ServerResponse> renderErrorResponse(ServerRequest request) {
-        var errorAttributes =
-            getErrorAttributes(request, getErrorAttributeOptions(request, MediaType.ALL));
+        var errorAttributes = getErrorAttributes(request, getErrorAttributeOptions(request, MediaType.ALL));
         return ServerResponse.status(getHttpStatus(errorAttributes))
-            .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-            .bodyValue(errorAttributes.get("error"));
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .bodyValue(errorAttributes.get("error"));
     }
 
     @Override
     protected Mono<ServerResponse> renderErrorView(ServerRequest request) {
-        return themeResolver.getTheme(request.exchange())
-            .flatMap(themeContext -> super.renderErrorView(request)
-                .contextWrite(Context.of(ThemeContext.class, themeContext)));
+        return themeResolver
+                .getTheme(request.exchange())
+                .flatMap(themeContext ->
+                        super.renderErrorView(request).contextWrite(Context.of(ThemeContext.class, themeContext)));
     }
 
     @Override
-    protected Mono<ServerResponse> renderErrorView(String viewName,
-        ServerResponse.BodyBuilder responseBody, Map<String, Object> error) {
+    protected Mono<ServerResponse> renderErrorView(
+            String viewName, ServerResponse.BodyBuilder responseBody, Map<String, Object> error) {
         return Mono.deferContextual(contextView -> {
             Optional<ThemeContext> themeContext = contextView.getOrEmpty(ThemeContext.class);
             if (themeContext.isPresent()
-                && templateAvailabilityProvider.isTemplateAvailable(themeContext.get(), viewName)) {
+                    && templateAvailabilityProvider.isTemplateAvailable(themeContext.get(), viewName)) {
                 return responseBody.render(viewName, error);
             }
             return super.renderErrorView(viewName, responseBody, error);

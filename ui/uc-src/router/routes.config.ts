@@ -1,14 +1,17 @@
-import type { RouteRecordRaw } from "vue-router";
-import NotFound from "@/views/exceptions/NotFound.vue";
-import Forbidden from "@/views/exceptions/Forbidden.vue";
 import BasicLayout from "@uc/layouts/BasicLayout.vue";
-import ResetPassword from "@uc/views/ResetPassword.vue";
+import type { RouteRecordRaw } from "vue-router";
 
 export const routes: Array<RouteRecordRaw> = [
   {
     path: "/:pathMatch(.*)*",
     component: BasicLayout,
-    children: [{ path: "", name: "NotFound", component: NotFound }],
+    children: [
+      {
+        path: "",
+        name: "NotFound",
+        component: () => import("@/views/exceptions/NotFound.vue"),
+      },
+    ],
   },
   {
     path: "/403",
@@ -17,17 +20,9 @@ export const routes: Array<RouteRecordRaw> = [
       {
         path: "",
         name: "Forbidden",
-        component: Forbidden,
+        component: () => import("@/views/exceptions/Forbidden.vue"),
       },
     ],
-  },
-  {
-    path: "/reset-password/:username",
-    component: ResetPassword,
-    name: "ResetPassword",
-    meta: {
-      title: "core.uc_reset_password.title",
-    },
   },
 ];
 

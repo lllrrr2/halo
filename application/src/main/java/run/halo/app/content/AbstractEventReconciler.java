@@ -3,13 +3,8 @@ package run.halo.app.content;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.context.SmartLifecycle;
-import run.halo.app.extension.ExtensionClient;
-import run.halo.app.extension.controller.Controller;
-import run.halo.app.extension.controller.ControllerBuilder;
-import run.halo.app.extension.controller.DefaultController;
-import run.halo.app.extension.controller.DefaultQueue;
-import run.halo.app.extension.controller.Reconciler;
-import run.halo.app.extension.controller.RequestQueue;
+import run.halo.app.extension.controller.*;
+import run.halo.app.infra.InitializationPhase;
 
 /**
  * An abstract class for reconciling events.
@@ -24,12 +19,9 @@ public abstract class AbstractEventReconciler<E> implements Reconciler<E>, Smart
 
     protected volatile boolean running = false;
 
-    protected final ExtensionClient client;
-
     private final String controllerName;
 
-    protected AbstractEventReconciler(String controllerName, ExtensionClient client) {
-        this.client = client;
+    protected AbstractEventReconciler(String controllerName) {
         this.controllerName = controllerName;
         this.queue = new DefaultQueue<>(Instant::now);
         this.controller = this.setupWith(null);
@@ -38,13 +30,7 @@ public abstract class AbstractEventReconciler<E> implements Reconciler<E>, Smart
     @Override
     public Controller setupWith(ControllerBuilder builder) {
         return new DefaultController<>(
-            controllerName,
-            this,
-            queue,
-            null,
-            Duration.ofMillis(100),
-            Duration.ofMinutes(10)
-        );
+                controllerName, this, queue, null, Duration.ofMillis(100), Duration.ofMinutes(10));
     }
 
     @Override
@@ -62,5 +48,10 @@ public abstract class AbstractEventReconciler<E> implements Reconciler<E>, Smart
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    @Override
+    public int getPhase() {
+        return InitializationPhase.CONTROLLERS.getPhase();
     }
 }

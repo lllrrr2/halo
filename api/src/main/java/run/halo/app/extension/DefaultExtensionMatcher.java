@@ -4,7 +4,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.CollectionUtils;
-import run.halo.app.extension.index.query.QueryFactory;
+import run.halo.app.extension.index.query.Condition;
+import run.halo.app.extension.index.query.Queries;
 import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.app.extension.router.selector.LabelSelector;
 
@@ -17,8 +18,7 @@ public class DefaultExtensionMatcher implements ExtensionMatcher {
     private final LabelSelector labelSelector;
     private final FieldSelector fieldSelector;
 
-    public static DefaultExtensionMatcherBuilder builder(ExtensionClient client,
-        GroupVersionKind gvk) {
+    public static DefaultExtensionMatcherBuilder builder(ExtensionClient client, GroupVersionKind gvk) {
         return internalBuilder().client(client).gvk(gvk);
     }
 
@@ -38,13 +38,12 @@ public class DefaultExtensionMatcher implements ExtensionMatcher {
         }
         var listOptions = new ListOptions();
         listOptions.setLabelSelector(labelSelector);
-        var fieldQuery = QueryFactory.all();
+        var fieldQuery = Queries.equal("metadata.name", extension.getMetadata().getName());
         if (hasFieldSelector()) {
-            fieldQuery = QueryFactory.and(fieldQuery, fieldSelector.query());
+            fieldQuery = fieldQuery.and((Condition) fieldSelector.query());
         }
         listOptions.setFieldSelector(new FieldSelector(fieldQuery));
-        return client.indexedQueryEngine().retrieve(getGvk(),
-            listOptions, PageRequestImpl.ofSize(1)).getTotal() > 0;
+        return client.countBy(extension.getClass(), listOptions) > 0;
     }
 
     boolean hasFieldSelector() {
@@ -52,6 +51,6 @@ public class DefaultExtensionMatcher implements ExtensionMatcher {
     }
 
     boolean hasLabelSelector() {
-        return labelSelector != null && !CollectionUtils.isEmpty(labelSelector.getMatchers());
+        return labelSelector != null && !CollectionUtils.isEmpty(labelSelector.getConditions());
     }
 }

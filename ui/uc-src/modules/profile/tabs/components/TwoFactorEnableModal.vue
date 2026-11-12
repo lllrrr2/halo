@@ -1,36 +1,49 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
+import { ucApiClient } from "@halo-dev/api-client";
 import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import PasswordValidationForm from "./PasswordValidationForm.vue";
 
+const props = defineProps<{
+  totpConfigured?: boolean;
+}>();
+
 const queryClient = useQueryClient();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   (event: "close"): void;
 }>();
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
 const { mutate, isLoading } = useMutation({
   mutationKey: ["enable-two-factor"],
-  mutationFn: async ({ password }: { password: string }) => {
-    return await apiClient.twoFactor.enableTwoFactor({
+  mutationFn: async ({
+    password,
+    totpCode,
+  }: {
+    password: string;
+    totpCode?: string;
+  }) => {
+    return await ucApiClient.security.twoFactor.enableTwoFactor({
       passwordRequest: {
         password: password,
+        totpCode: totpCode,
       },
     });
   },
   onSuccess() {
-    Toast.success("启用成功");
+    Toast.success(t("core.common.toast.enable_success"));
     queryClient.invalidateQueries({ queryKey: ["two-factor-settings"] });
-    modal.value.close();
+    modal.value?.close();
   },
 });
 
-function onSubmit(password: string) {
-  mutate({ password });
+function onSubmit(data: { password: string; totpCode?: string }) {
+  mutate({ password: data.password, totpCode: data.totpCode });
 }
 </script>
 
@@ -39,10 +52,13 @@ function onSubmit(password: string) {
     ref="modal"
     :width="500"
     :centered="false"
-    title="启用两步验证"
+    :title="$t('core.uc_profile.2fa.operations.enable.title')"
     @close="emit('close')"
   >
-    <PasswordValidationForm @submit="onSubmit" />
+    <PasswordValidationForm
+      :totp-configured="props.totpConfigured"
+      @submit="onSubmit"
+    />
     <template #footer>
       <VSpace>
         <VButton
@@ -50,9 +66,11 @@ function onSubmit(password: string) {
           type="secondary"
           @click="$formkit.submit('password-validation-form')"
         >
-          启用
+          {{ $t("core.common.buttons.enable") }}
         </VButton>
-        <VButton @click="modal.close()">关闭</VButton>
+        <VButton @click="modal?.close()">
+          {{ $t("core.common.buttons.close") }}
+        </VButton>
       </VSpace>
     </template>
   </VModal>

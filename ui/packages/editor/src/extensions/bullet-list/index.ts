@@ -1,56 +1,62 @@
-import type { Editor, Range } from "@/tiptap/vue-3";
-import TiptapBulletList from "@tiptap/extension-bullet-list";
-import type { BulletListOptions } from "@tiptap/extension-bullet-list";
-import ExtensionListItem from "@tiptap/extension-list-item";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import MdiFormatListBulleted from "~icons/mdi/format-list-bulleted";
+import {
+  BulletList as TiptapBulletList,
+  type BulletListOptions,
+} from "@tiptap/extension-list";
 import { markRaw } from "vue";
+import MingcuteListCheckLine from "~icons/mingcute/list-check-line";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import type { Editor, Range } from "@/tiptap";
 import type { ExtensionOptions } from "@/types";
+import { ExtensionListItem } from "../list-item";
 
-const BulletList = TiptapBulletList.extend<
-  ExtensionOptions & BulletListOptions
->({
+export type ExtensionBulletListOptions = Partial<BulletListOptions> &
+  ExtensionOptions;
+
+export const ExtensionBulletList = TiptapBulletList.extend<ExtensionOptions>({
+  addKeyboardShortcuts() {
+    return defineHaloKeyboardShortcuts(this, [
+      {
+        id: "editor.structure.bulletList",
+        keys: ["Mod-Shift-8"],
+        label: () => i18n.global.t("editor.shortcuts.commands.bullet_list"),
+        category: "structure",
+        priority: 90,
+      },
+    ]);
+  },
+
+  addHaloEditorMetadata() {
+    return {
+      ai: {
+        description: "An unordered list of related items.",
+        aliases: ["unordered list"],
+        exposure: "recommended",
+        useWhen: ["Item order is not significant."],
+        avoidWhen: ["The sequence or ranking of items matters."],
+        generation: {
+          mode: "direct-html",
+        },
+        examples: [
+          "<ul><li><p>First point</p></li><li><p>Second point</p></li></ul>",
+          "<ul><li><p>Parent point</p><ul><li><p>Nested point</p></li></ul></li></ul>",
+        ],
+      },
+    };
+  },
+
   addOptions() {
     return {
       ...this.parent?.(),
-      getToolbarItems({ editor }: { editor: Editor }) {
-        return {
-          priority: 130,
-          component: markRaw(ToolbarItem),
-          props: {
-            editor,
-            isActive: editor.isActive("bulletList"),
-            icon: markRaw(MdiFormatListBulleted),
-            title: i18n.global.t("editor.common.bullet_list"),
-            action: () => editor.chain().focus().toggleBulletList().run(),
-          },
-        };
-      },
       getCommandMenuItems() {
         return {
           priority: 130,
-          icon: markRaw(MdiFormatListBulleted),
+          icon: markRaw(MingcuteListCheckLine),
           title: "editor.common.bullet_list",
           keywords: ["bulletlist", "wuxuliebiao"],
+          shortcutId: "editor.structure.bulletList",
           command: ({ editor, range }: { editor: Editor; range: Range }) => {
             editor.chain().focus().deleteRange(range).toggleBulletList().run();
-          },
-        };
-      },
-      getDraggable() {
-        return {
-          getRenderContainer({ dom }) {
-            let container = dom;
-            while (container && !(container.tagName === "LI")) {
-              container = container.parentElement as HTMLElement;
-            }
-            return {
-              el: container,
-              dragDomOffset: {
-                x: -12,
-              },
-            };
           },
         };
       },
@@ -60,5 +66,3 @@ const BulletList = TiptapBulletList.extend<
     return [ExtensionListItem];
   },
 });
-
-export default BulletList;

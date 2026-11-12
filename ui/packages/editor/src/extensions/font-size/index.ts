@@ -1,117 +1,137 @@
-import { ToolbarItem, ToolbarSubItem } from "@/components";
-import { Extension, type Editor } from "@/tiptap/vue-3";
+import {
+  FontSize as TiptapFontSize,
+  type FontSizeOptions,
+} from "@tiptap/extension-text-style";
 import { markRaw } from "vue";
-import MdiFormatSize from "~icons/mdi/format-size";
-import TiptapTextStyle from "@tiptap/extension-text-style";
+import MingcuteFontSizeLine from "~icons/mingcute/font-size-line";
+import { ToolbarItem, ToolbarSubItem } from "@/components";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import { type Editor } from "@/tiptap";
+import type { ExtensionOptions } from "@/types";
 
-export type FontSizeOptions = {
-  types: string[];
-};
+const FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72] as const;
 
-declare module "@/tiptap" {
-  interface Commands<ReturnType> {
-    fontSize: {
-      setFontSize: (size: number) => ReturnType;
-      unsetFontSize: () => ReturnType;
-    };
+function changeFontSize(editor: Editor, direction: -1 | 1): boolean {
+  const currentValue = Number.parseFloat(
+    editor.getAttributes("textStyle").fontSize ?? "16"
+  );
+  const target =
+    direction > 0
+      ? FONT_SIZES.find((size) => size > currentValue)
+      : [...FONT_SIZES].reverse().find((size) => size < currentValue);
+
+  if (!target) {
+    return false;
   }
+  return editor.chain().focus().setFontSize(`${target}px`).run();
 }
 
-const FontSize = Extension.create<FontSizeOptions>({
-  name: "fontSize",
+export type ExtensionFontSizeOptions = Partial<FontSizeOptions> &
+  ExtensionOptions;
 
-  addOptions() {
-    return {
-      types: ["textStyle"],
-      getToolbarItems({ editor }: { editor: Editor }) {
-        return {
-          priority: 31,
-          component: markRaw(ToolbarItem),
-          props: {
-            editor,
-            isActive: false,
-            icon: markRaw(MdiFormatSize),
-          },
-          children: [
-            {
-              priority: 0,
-              component: markRaw(ToolbarSubItem),
-              props: {
-                editor,
-                isActive: false,
-                title: i18n.global.t("editor.common.text.default"),
-                action: () => editor.chain().focus().unsetFontSize().run(),
+export const ExtensionFontSize =
+  TiptapFontSize.extend<ExtensionFontSizeOptions>({
+    name: "fontSize",
+
+    addKeyboardShortcuts() {
+      return defineHaloKeyboardShortcuts(this, [
+        {
+          id: "editor.format.increaseFontSize",
+          keys: ["Mod-Alt-+"],
+          label: () =>
+            i18n.global.t("editor.shortcuts.commands.increase_font_size"),
+          category: "formatting",
+          priority: 45,
+          command: () => changeFontSize(this.editor, 1),
+        },
+        {
+          id: "editor.format.decreaseFontSize",
+          keys: ["Mod-Alt--"],
+          label: () =>
+            i18n.global.t("editor.shortcuts.commands.decrease_font_size"),
+          category: "formatting",
+          priority: 46,
+          command: () => changeFontSize(this.editor, -1),
+        },
+      ]);
+    },
+
+    addHaloEditorMetadata() {
+      return {
+        contributions: (this.options.types ?? []).map((name) => ({
+          targets: [{ kind: "mark" as const, name }],
+          metadata: {
+            ai: {
+              attributeGuidance: {
+                fontSize: {
+                  description: "CSS font size for the inline text.",
+                  format: "CSS length",
+                  allowedValues: FONT_SIZES.map((size) => `${size}px`),
+                  omitWhen: ["The inherited font size is appropriate."],
+                },
               },
             },
-            ...[8, 10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72].map(
-              (size) => {
+          },
+        })),
+      };
+    },
+
+    addOptions() {
+      return {
+        ...this.parent?.(),
+        types: ["textStyle"],
+        getToolbarItems({ editor }: { editor: Editor }) {
+          const currentFontSize = editor.getAttributes("textStyle").fontSize as
+            | string
+            | undefined;
+          return {
+            priority: 31,
+            component: markRaw(ToolbarItem),
+            props: {
+              editor,
+              isActive: !!currentFontSize,
+              icon: markRaw(MingcuteFontSizeLine),
+              title: i18n.global.t("editor.extensions.font_size.title"),
+              shortcutIds: [
+                "editor.format.increaseFontSize",
+                "editor.format.decreaseFontSize",
+              ],
+            },
+            children: [
+              {
+                priority: 0,
+                component: markRaw(ToolbarSubItem),
+                props: {
+                  editor,
+                  isActive: !currentFontSize,
+                  selectionIndicator: "leading",
+                  title: i18n.global.t("editor.common.text.default"),
+                  action: () => editor.chain().focus().unsetFontSize().run(),
+                },
+              },
+              ...FONT_SIZES.map((size) => {
                 return {
                   priority: size,
                   component: markRaw(ToolbarSubItem),
                   props: {
                     editor,
-                    isActive: false,
+                    isActive: Number.parseFloat(currentFontSize ?? "") === size,
+                    selectionIndicator: "leading",
                     title: `${size} px`,
-                    action: () =>
-                      editor.chain().focus().setFontSize(size).run(),
+                    action: () => {
+                      return editor
+                        .chain()
+                        .focus()
+                        .setFontSize(`${size}px`)
+                        .run();
+                    },
                   },
                 };
-              }
-            ),
-          ],
-        };
-      },
-    };
-  },
-
-  addGlobalAttributes() {
-    return [
-      {
-        types: this.options.types,
-        attributes: {
-          fontSize: {
-            default: null,
-            parseHTML: (element) => {
-              return element.style.fontSize || "";
-            },
-            renderHTML: (attributes) => {
-              if (!attributes.fontSize) {
-                return attributes;
-              }
-
-              return {
-                style: `font-size: ${attributes.fontSize
-                  .toString()
-                  .replace("px", "")}px`,
-              };
-            },
-          },
+              }),
+            ],
+          };
         },
-      },
-    ];
-  },
-
-  addCommands() {
-    return {
-      setFontSize:
-        (size) =>
-        ({ chain }) => {
-          return chain().setMark("textStyle", { fontSize: size }).run();
-        },
-      unsetFontSize:
-        () =>
-        ({ chain }) => {
-          return chain()
-            .setMark("textStyle", { fontSize: null })
-            .removeEmptyTextStyle()
-            .run();
-        },
-    };
-  },
-  addExtensions() {
-    return [TiptapTextStyle];
-  },
-});
-
-export default FontSize;
+      };
+    },
+  });

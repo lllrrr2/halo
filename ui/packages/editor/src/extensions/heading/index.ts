@@ -1,24 +1,74 @@
-import { mergeAttributes, type Editor, type Range } from "@/tiptap/vue-3";
-import TiptapParagraph from "@/extensions/paragraph";
-import TiptapHeading from "@tiptap/extension-heading";
-import type { HeadingOptions } from "@tiptap/extension-heading";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import ToolbarSubItem from "@/components/toolbar/ToolbarSubItem.vue";
-import MdiFormatParagraph from "~icons/mdi/format-paragraph";
-import MdiFormatHeaderPound from "~icons/mdi/format-header-pound";
-import MdiFormatHeader1 from "~icons/mdi/format-header-1";
-import MdiFormatHeader2 from "~icons/mdi/format-header-2";
-import MdiFormatHeader3 from "~icons/mdi/format-header-3";
-import MdiFormatHeader4 from "~icons/mdi/format-header-4";
-import MdiFormatHeader5 from "~icons/mdi/format-header-5";
-import MdiFormatHeader6 from "~icons/mdi/format-header-6";
+import TiptapHeading, { type HeadingOptions } from "@tiptap/extension-heading";
 import { markRaw } from "vue";
+import LucideHeading1 from "~icons/lucide/heading-1";
+import LucideHeading2 from "~icons/lucide/heading-2";
+import LucideHeading3 from "~icons/lucide/heading-3";
+import LucideHeading4 from "~icons/lucide/heading-4";
+import LucideHeading5 from "~icons/lucide/heading-5";
+import LucideHeading6 from "~icons/lucide/heading-6";
+import MingcuteParagraphLine from "~icons/mingcute/paragraph-line";
+import { CONVERT_TO_KEY } from "@/components/drag/default-drag";
+import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
+import ToolbarTextTypeSubItem from "@/components/toolbar/ToolbarTextTypeSubItem.vue";
+import { ExtensionParagraph } from "@/extensions/paragraph";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import {
+  AttrStep,
+  mergeAttributes,
+  Plugin,
+  PluginKey,
+  type Editor,
+  type Range,
+} from "@/tiptap";
 import type { ExtensionOptions } from "@/types";
-import { AttrStep, Plugin, PluginKey } from "@/tiptap";
 import { generateAnchorId } from "@/utils";
 
-const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
+export type ExtensionHeadingOptions = ExtensionOptions & HeadingOptions;
+
+export const ExtensionHeading = TiptapHeading.extend<ExtensionHeadingOptions>({
+  haloEditorIndentation: {
+    legacyLineIndent: true,
+  },
+
+  addHaloEditorMetadata() {
+    return {
+      ai: {
+        description:
+          "A section heading whose level communicates document hierarchy.",
+        exposure: "recommended",
+        useWhen: ["Introducing a titled section or subsection."],
+        avoidWhen: ["Styling ordinary body text without creating a section."],
+        contentGuidelines: [
+          "Keep heading levels hierarchical and avoid skipping levels without a structural reason.",
+          "Keep the heading text concise.",
+        ],
+        attributeGuidance: {
+          level: {
+            description: "Heading level rendered as h1 through h6.",
+            allowedValues: this.options.levels,
+          },
+          id: {
+            description:
+              "Editor-managed anchor identifier regenerated from the heading text.",
+            format: "HTML id",
+            omitWhen: [
+              "Generating or editing article content; the editor maintains this value.",
+            ],
+          },
+        },
+        generation: {
+          mode: "direct-html",
+        },
+        examples: [
+          "<h1>Guide</h1>",
+          "<h2>Installation</h2>",
+          "<h3>Configuration options</h3>",
+        ],
+      },
+    };
+  },
+
   renderHTML({ node, HTMLAttributes }) {
     const hasLevel = this.options.levels.includes(node.attrs.level);
     const level = hasLevel ? node.attrs.level : this.options.levels[0];
@@ -29,9 +79,32 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
     ];
   },
 
-  addOptions() {
+  addKeyboardShortcuts() {
+    return defineHaloKeyboardShortcuts(
+      this,
+      this.options.levels.map((level) => ({
+        id: `editor.structure.heading${level}`,
+        keys: [`Mod-Alt-${level}`],
+        label: () =>
+          i18n.global.t("editor.shortcuts.commands.heading", { level }),
+        category: "structure" as const,
+        priority: 10 + level * 10,
+      }))
+    );
+  },
+
+  addAttributes() {
     return {
       ...this.parent?.(),
+      id: {
+        default: null,
+      },
+    };
+  },
+
+  addOptions() {
+    return {
+      ...this.parent!(),
       getToolbarItems({ editor }: { editor: Editor }) {
         return {
           priority: 30,
@@ -39,89 +112,98 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
           props: {
             editor,
             isActive:
-              editor.isActive("paragraph") || editor.isActive("heading"),
-            icon: markRaw(MdiFormatHeaderPound),
+              editor.isActive(ExtensionParagraph.name) ||
+              editor.isActive(TiptapHeading.name),
+            icon: markRaw(getIcon(editor)),
+            title: i18n.global.t("editor.common.heading.title"),
           },
           children: [
             {
               priority: 10,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("paragraph"),
-                icon: markRaw(MdiFormatParagraph),
+                isActive: editor.isActive(ExtensionParagraph.name),
+                level: 0,
                 title: i18n.global.t("editor.common.heading.paragraph"),
+                shortcutId: "editor.structure.paragraph",
                 action: () => editor.chain().focus().setParagraph().run(),
               },
             },
             {
               priority: 20,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 1 }),
-                icon: markRaw(MdiFormatHeader1),
-                title: i18n.global.t("editor.common.heading.header1"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 1 }),
+                level: 1,
+                title: i18n.global.t("editor.common.heading.heading1"),
+                shortcutId: "editor.structure.heading1",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 1 }).run(),
               },
             },
             {
               priority: 30,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 2 }),
-                icon: markRaw(MdiFormatHeader2),
-                title: i18n.global.t("editor.common.heading.header2"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 2 }),
+                level: 2,
+                title: i18n.global.t("editor.common.heading.heading2"),
+                shortcutId: "editor.structure.heading2",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 2 }).run(),
               },
             },
             {
               priority: 40,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 3 }),
-                icon: markRaw(MdiFormatHeader3),
-                title: i18n.global.t("editor.common.heading.header3"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 3 }),
+                level: 3,
+                title: i18n.global.t("editor.common.heading.heading3"),
+                shortcutId: "editor.structure.heading3",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 3 }).run(),
               },
             },
             {
               priority: 50,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 4 }),
-                icon: markRaw(MdiFormatHeader4),
-                title: i18n.global.t("editor.common.heading.header4"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 4 }),
+                level: 4,
+                title: i18n.global.t("editor.common.heading.heading4"),
+                shortcutId: "editor.structure.heading4",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 4 }).run(),
               },
             },
             {
               priority: 60,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 5 }),
-                icon: markRaw(MdiFormatHeader5),
-                title: i18n.global.t("editor.common.heading.header5"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 5 }),
+                level: 5,
+                title: i18n.global.t("editor.common.heading.heading5"),
+                shortcutId: "editor.structure.heading5",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 5 }).run(),
               },
             },
             {
               priority: 70,
-              component: markRaw(ToolbarSubItem),
+              component: markRaw(ToolbarTextTypeSubItem),
               props: {
                 editor,
-                isActive: editor.isActive("heading", { level: 6 }),
-                icon: markRaw(MdiFormatHeader6),
-                title: i18n.global.t("editor.common.heading.header6"),
+                isActive: editor.isActive(TiptapHeading.name, { level: 6 }),
+                level: 6,
+                title: i18n.global.t("editor.common.heading.heading6"),
+                shortcutId: "editor.structure.heading6",
                 action: () =>
                   editor.chain().focus().toggleHeading({ level: 6 }).run(),
               },
@@ -133,156 +215,172 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
         return [
           {
             priority: 10,
-            icon: markRaw(MdiFormatParagraph),
+            icon: markRaw(MingcuteParagraphLine),
             title: "editor.common.heading.paragraph",
             keywords: ["paragraph", "text", "putongwenben"],
+            shortcutId: "editor.structure.paragraph",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor.chain().focus().deleteRange(range).setParagraph().run();
             },
           },
           {
             priority: 20,
-            icon: markRaw(MdiFormatHeader1),
-            title: "editor.common.heading.header1",
-            keywords: ["h1", "header1", "1", "yijibiaoti"],
+            icon: markRaw(LucideHeading1),
+            title: "editor.common.heading.heading1",
+            keywords: ["h1", "heading1", "1", "yijibiaoti"],
+            shortcutId: "editor.structure.heading1",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 1 })
+                .setNode(TiptapHeading.name, { level: 1 })
                 .run();
             },
           },
           {
             priority: 30,
-            icon: markRaw(MdiFormatHeader2),
-            title: "editor.common.heading.header2",
-            keywords: ["h2", "header2", "2", "erjibiaoti"],
+            icon: markRaw(LucideHeading2),
+            title: "editor.common.heading.heading2",
+            keywords: ["h2", "heading2", "2", "erjibiaoti"],
+            shortcutId: "editor.structure.heading2",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 2 })
+                .setNode(TiptapHeading.name, { level: 2 })
                 .run();
             },
           },
           {
             priority: 40,
-            icon: markRaw(MdiFormatHeader3),
-            title: "editor.common.heading.header3",
-            keywords: ["h3", "header3", "3", "sanjibiaoti"],
+            icon: markRaw(LucideHeading3),
+            title: "editor.common.heading.heading3",
+            keywords: ["h3", "heading3", "3", "sanjibiaoti"],
+            shortcutId: "editor.structure.heading3",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 3 })
+                .setNode(TiptapHeading.name, { level: 3 })
                 .run();
             },
           },
           {
             priority: 50,
-            icon: markRaw(MdiFormatHeader4),
-            title: "editor.common.heading.header4",
-            keywords: ["h4", "header4", "4", "sijibiaoti"],
+            icon: markRaw(LucideHeading4),
+            title: "editor.common.heading.heading4",
+            keywords: ["h4", "heading4", "4", "sijibiaoti"],
+            shortcutId: "editor.structure.heading4",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 4 })
+                .setNode(TiptapHeading.name, { level: 4 })
                 .run();
             },
           },
           {
             priority: 60,
-            icon: markRaw(MdiFormatHeader5),
-            title: "editor.common.heading.header5",
-            keywords: ["h5", "header5", "5", "wujibiaoti"],
+            icon: markRaw(LucideHeading5),
+            title: "editor.common.heading.heading5",
+            keywords: ["h5", "heading5", "5", "wujibiaoti"],
+            shortcutId: "editor.structure.heading5",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 5 })
+                .setNode(TiptapHeading.name, { level: 5 })
                 .run();
             },
           },
           {
             priority: 70,
-            icon: markRaw(MdiFormatHeader6),
-            title: "editor.common.heading.header6",
-            keywords: ["h6", "header6", "6", "liujibiaoti"],
+            icon: markRaw(LucideHeading6),
+            title: "editor.common.heading.heading6",
+            keywords: ["h6", "heading6", "6", "liujibiaoti"],
+            shortcutId: "editor.structure.heading6",
             command: ({ editor, range }: { editor: Editor; range: Range }) => {
               editor
                 .chain()
                 .focus()
                 .deleteRange(range)
-                .setNode("heading", { level: 6 })
+                .setNode(TiptapHeading.name, { level: 6 })
                 .run();
             },
           },
         ];
       },
-      getDraggable() {
+      getDraggableMenuItems() {
         return {
-          getRenderContainer({ dom }: { dom: HTMLElement }) {
-            const tagNames = ["H1", "H2", "H3", "H4", "H5", "H6"];
-            let container = dom;
-            while (container && !tagNames.includes(container.tagName)) {
-              container = container.parentElement as HTMLElement;
-            }
-            if (!container) {
-              return {
-                el: dom,
-              };
-            }
-            let y;
-            switch (container?.tagName) {
-              case "H1":
-                y = 10;
-                break;
-              case "H2":
-                y = 2;
-                break;
-              case "H3":
-                y = 0;
-                break;
-              case "H4":
-                y = -3;
-                break;
-              case "H5":
-                y = -5;
-                break;
-              case "H6":
-                y = -5;
-                break;
-              default:
-                y = 0;
-                break;
-            }
-            return {
-              el: container,
-              dragDomOffset: {
-                y: y,
+          extendsKey: CONVERT_TO_KEY,
+          children: {
+            items: [
+              {
+                priority: 10,
+                icon: markRaw(MingcuteParagraphLine),
+                title: i18n.global.t("editor.common.heading.paragraph"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setParagraph().run(),
               },
-            };
+              {
+                priority: 20,
+                icon: markRaw(LucideHeading1),
+                title: i18n.global.t("editor.common.heading.heading1"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 1 }).run(),
+              },
+              {
+                priority: 30,
+                icon: markRaw(LucideHeading2),
+                title: i18n.global.t("editor.common.heading.heading2"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 2 }).run(),
+              },
+              {
+                priority: 40,
+                icon: markRaw(LucideHeading3),
+                title: i18n.global.t("editor.common.heading.heading3"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 3 }).run(),
+              },
+              {
+                priority: 50,
+                icon: markRaw(LucideHeading4),
+                title: i18n.global.t("editor.common.heading.heading4"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 4 }).run(),
+              },
+              {
+                priority: 60,
+                icon: markRaw(LucideHeading5),
+                title: i18n.global.t("editor.common.heading.heading5"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 5 }).run(),
+              },
+              {
+                priority: 70,
+                icon: markRaw(LucideHeading6),
+                title: i18n.global.t("editor.common.heading.heading6"),
+                action: ({ editor }: { editor: Editor }) =>
+                  editor.chain().focus().setHeading({ level: 6 }).run(),
+              },
+            ],
           },
         };
       },
     };
-  },
-  addExtensions() {
-    return [TiptapParagraph];
   },
   addProseMirrorPlugins() {
     let beforeComposition: boolean | undefined = undefined;
     return [
       new Plugin({
         key: new PluginKey("generate-heading-id"),
-        appendTransaction: (transactions, oldState, newState) => {
+        appendTransaction: (transactions, _oldState, newState) => {
           const isChangeHeading = transactions.some((transaction) => {
             const composition = this.editor.view.composing;
             if (beforeComposition !== undefined && !composition) {
@@ -290,11 +388,14 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
               return true;
             }
             if (transaction.docChanged) {
+              if (transaction.getMeta("paste")) {
+                return true;
+              }
               beforeComposition = composition;
               const selection = transaction.selection;
               const { $from } = selection;
               const node = $from.parent;
-              return node.type.name === Blockquote.name && !composition;
+              return node.type.name === ExtensionHeading.name && !composition;
             }
             return false;
           });
@@ -302,7 +403,7 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
             const tr = newState.tr;
             const headingIds: string[] = [];
             newState.doc.descendants((node, pos) => {
-              if (node.type.name === Blockquote.name) {
+              if (node.type.name === ExtensionHeading.name) {
                 const id = generateAnchorId(node.textContent, headingIds);
                 tr.step(new AttrStep(pos, "id", id));
                 headingIds.push(id);
@@ -317,4 +418,27 @@ const Blockquote = TiptapHeading.extend<ExtensionOptions & HeadingOptions>({
   },
 });
 
-export default Blockquote;
+function getIcon(editor: Editor) {
+  if (editor.isActive(ExtensionParagraph.name)) {
+    return MingcuteParagraphLine;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 1 })) {
+    return LucideHeading1;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 2 })) {
+    return LucideHeading2;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 3 })) {
+    return LucideHeading3;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 4 })) {
+    return LucideHeading4;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 5 })) {
+    return LucideHeading5;
+  }
+  if (editor.isActive(ExtensionHeading.name, { level: 6 })) {
+    return LucideHeading6;
+  }
+  return MingcuteParagraphLine;
+}

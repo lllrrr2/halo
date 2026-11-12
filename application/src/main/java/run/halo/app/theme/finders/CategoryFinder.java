@@ -1,7 +1,7 @@
 package run.halo.app.theme.finders;
 
-import java.util.List;
-import org.springframework.lang.Nullable;
+import java.util.Collection;
+import org.jspecify.annotations.Nullable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.content.Category;
@@ -19,7 +19,7 @@ public interface CategoryFinder {
 
     Mono<CategoryVo> getByName(String name);
 
-    Flux<CategoryVo> getByNames(List<String> names);
+    Flux<CategoryVo> getByNames(Collection<String> names);
 
     Mono<ListResult<CategoryVo>> list(@Nullable Integer page, @Nullable Integer size);
 
@@ -30,4 +30,6 @@ public interface CategoryFinder {
     Flux<CategoryTreeVo> listAsTree(String name);
 
     Mono<CategoryVo> getParentByName(String name);
+
+    Flux<CategoryVo> getBreadcrumbs(String name);
 }

@@ -1,8 +1,9 @@
 package run.halo.app.content;
 
-import org.springframework.lang.NonNull;
+import java.util.List;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import run.halo.app.core.extension.content.Category;
 import run.halo.app.core.extension.content.Post;
 import run.halo.app.extension.ListResult;
 
@@ -20,7 +21,7 @@ public interface PostService {
 
     Mono<Post> updatePost(PostRequest postRequest);
 
-    Mono<Post> updateBy(@NonNull Post post);
+    Mono<Post> updateBy(Post post);
 
     Mono<ContentWrapper> getHeadContent(String postName);
 
@@ -50,4 +51,8 @@ public interface PostService {
     Mono<Post> revertToSpecifiedSnapshot(String postName, String snapshotName);
 
     Mono<ContentWrapper> deleteContent(String postName, String snapshotName);
+
+    Mono<Post> recycleBy(String postName, String username);
+
+    Flux<Category> listCategories(List<String> categories);
 }

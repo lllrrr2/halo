@@ -1,5 +1,8 @@
 package run.halo.app.theme.finders.vo;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.Iterator;
 import java.util.List;
 import lombok.Builder;
@@ -20,6 +23,7 @@ import run.halo.app.extension.MetadataOperator;
 @Builder
 public class MenuVo implements ExtensionVoOperator {
 
+    @Schema(requiredMode = REQUIRED)
     MetadataOperator metadata;
 
     Menu.Spec spec;
@@ -35,10 +39,10 @@ public class MenuVo implements ExtensionVoOperator {
      */
     public static MenuVo from(Menu menu) {
         return builder()
-            .metadata(menu.getMetadata())
-            .spec(menu.getSpec())
-            .menuItems(List.of())
-            .build();
+                .metadata(menu.getMetadata())
+                .spec(menu.getSpec())
+                .menuItems(List.of())
+                .build();
     }
 
     public void print(StringBuilder buffer) {

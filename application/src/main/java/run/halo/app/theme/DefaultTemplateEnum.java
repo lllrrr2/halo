@@ -32,13 +32,4 @@ public enum DefaultTemplateEnum {
     public String getValue() {
         return value;
     }
-
-    public static DefaultTemplateEnum convertFrom(String template) {
-        for (DefaultTemplateEnum e : values()) {
-            if (e.getValue().equals(template)) {
-                return e;
-            }
-        }
-        return null;
-    }
 }

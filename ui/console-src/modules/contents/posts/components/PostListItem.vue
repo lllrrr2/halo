@@ -1,33 +1,36 @@
 <script lang="ts" setup>
+import { useEntityFieldItemExtensionPoint } from "@console/composables/use-entity-extension-points";
+import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
+import type { ListedPost, Post } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
   Dialog,
   Toast,
   VDropdownDivider,
   VDropdownItem,
   VEntity,
-  VEntityField,
 } from "@halo-dev/components";
-import { formatDatetime } from "@/utils/date";
-import type { ListedPost, Post } from "@halo-dev/api-client";
-import { useI18n } from "vue-i18n";
-import { usePermission } from "@/utils/permission";
-import { apiClient } from "@/utils/api-client";
+import {
+  utils,
+  type EntityFieldItem,
+  type OperationItem,
+} from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
 import type { Ref } from "vue";
-import { computed, toRefs, markRaw, ref, inject } from "vue";
+import { computed, inject, markRaw, ref, toRefs } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
-import { useEntityFieldItemExtensionPoint } from "@console/composables/use-entity-extension-points";
-import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
-import EntityDropdownItems from "@/components/entity/EntityDropdownItems.vue";
-import type { EntityFieldItem, OperationItem } from "@halo-dev/console-shared";
-import TitleField from "./entity-fields/TitleField.vue";
 import EntityFieldItems from "@/components/entity-fields/EntityFieldItems.vue";
-import ContributorsField from "./entity-fields/ContributorsField.vue";
-import PublishStatusField from "./entity-fields/PublishStatusField.vue";
-import VisibleField from "./entity-fields/VisibleField.vue";
 import StatusDotField from "@/components/entity-fields/StatusDotField.vue";
+import EntityDropdownItems from "@/components/entity/EntityDropdownItems.vue";
+import { postLabels } from "@/constants/labels";
+import ContributorsField from "./entity-fields/ContributorsField.vue";
+import CoverField from "./entity-fields/CoverField.vue";
+import PublishStatusField from "./entity-fields/PublishStatusField.vue";
+import PublishTimeField from "./entity-fields/PublishTimeField.vue";
+import TitleField from "./entity-fields/TitleField.vue";
+import VisibleField from "./entity-fields/VisibleField.vue";
 
-const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
 const queryClient = useQueryClient();
 const router = useRouter();
@@ -58,7 +61,7 @@ const handleDelete = async () => {
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
-      await apiClient.post.recyclePost({
+      await consoleApiClient.content.post.recyclePost({
         name: props.post.post.metadata.name,
       });
       await queryClient.invalidateQueries({ queryKey: ["posts"] });
@@ -68,10 +71,30 @@ const handleDelete = async () => {
   });
 };
 
-const { operationItems } = useOperationItemExtensionPoint<ListedPost>(
+const { data: operationItems } = useOperationItemExtensionPoint<ListedPost>(
   "post:list-item:operation:create",
   post,
   computed((): OperationItem<ListedPost>[] => [
+    {
+      priority: 0,
+      component: markRaw(VDropdownItem),
+      label: t("core.common.buttons.publish"),
+      action: async () => {
+        await consoleApiClient.content.post.publishPost({
+          name: props.post.post.metadata.name,
+        });
+
+        Toast.success(t("core.common.toast.publish_success"));
+
+        queryClient.invalidateQueries({
+          queryKey: ["posts"],
+        });
+      },
+      hidden:
+        props.post.post.metadata.labels?.[postLabels.PUBLISHED] == "true" ||
+        props.post.post.metadata.labels?.[postLabels.SCHEDULING_PUBLISH] ==
+          "true",
+    },
     {
       priority: 10,
       component: markRaw(VDropdownItem),
@@ -103,6 +126,29 @@ const { operationItems } = useOperationItemExtensionPoint<ListedPost>(
       props: {
         type: "danger",
       },
+      label: t("core.common.buttons.cancel_publish"),
+      action: async () => {
+        await consoleApiClient.content.post.unpublishPost({
+          name: props.post.post.metadata.name,
+        });
+
+        Toast.success(t("core.common.toast.cancel_publish_success"));
+
+        queryClient.invalidateQueries({
+          queryKey: ["posts"],
+        });
+      },
+      hidden:
+        props.post.post.metadata.labels?.[postLabels.PUBLISHED] !== "true" &&
+        props.post.post.metadata.labels?.[postLabels.SCHEDULING_PUBLISH] !==
+          "true",
+    },
+    {
+      priority: 50,
+      component: markRaw(VDropdownItem),
+      props: {
+        type: "danger",
+      },
       label: t("core.common.buttons.delete"),
       permissions: [],
       action: handleDelete,
@@ -110,12 +156,21 @@ const { operationItems } = useOperationItemExtensionPoint<ListedPost>(
   ])
 );
 
-const { startFields, endFields } = useEntityFieldItemExtensionPoint<ListedPost>(
+const { data: fields } = useEntityFieldItemExtensionPoint<ListedPost>(
   "post:list-item:field:create",
   post,
   computed((): EntityFieldItem[] => [
     {
       priority: 10,
+      position: "start",
+      component: markRaw(CoverField),
+      hidden: !props.post.post.spec.cover,
+      props: {
+        post: props.post,
+      },
+    },
+    {
+      priority: 20,
       position: "start",
       component: markRaw(TitleField),
       props: {
@@ -142,6 +197,7 @@ const { startFields, endFields } = useEntityFieldItemExtensionPoint<ListedPost>(
       priority: 30,
       position: "end",
       component: markRaw(VisibleField),
+      permissions: ["system:posts:manage"],
       props: {
         post: props.post,
       },
@@ -160,9 +216,10 @@ const { startFields, endFields } = useEntityFieldItemExtensionPoint<ListedPost>(
     {
       priority: 50,
       position: "end",
-      component: markRaw(VEntityField),
+      component: markRaw(PublishTimeField),
+      hidden: !props.post.post.spec.publishTime,
       props: {
-        description: formatDatetime(props.post.post.spec.publishTime),
+        post: props.post,
       },
     },
   ])
@@ -171,10 +228,7 @@ const { startFields, endFields } = useEntityFieldItemExtensionPoint<ListedPost>(
 
 <template>
   <VEntity :is-selected="isSelected">
-    <template
-      v-if="currentUserHasPermission(['system:posts:manage'])"
-      #checkbox
-    >
+    <template v-if="utils.permission.has(['system:posts:manage'])" #checkbox>
       <input
         v-model="selectedPostNames"
         :value="post.post.metadata.name"
@@ -183,16 +237,19 @@ const { startFields, endFields } = useEntityFieldItemExtensionPoint<ListedPost>(
       />
     </template>
     <template #start>
-      <EntityFieldItems :fields="startFields" />
+      <EntityFieldItems :fields="fields?.start || []" />
     </template>
     <template #end>
-      <EntityFieldItems :fields="endFields" />
+      <EntityFieldItems :fields="fields?.end || []" />
     </template>
     <template
-      v-if="currentUserHasPermission(['system:posts:manage'])"
+      v-if="utils.permission.has(['system:posts:manage'])"
       #dropdownItems
     >
-      <EntityDropdownItems :dropdown-items="operationItems" :item="post" />
+      <EntityDropdownItems
+        :dropdown-items="operationItems || []"
+        :item="post"
+      />
     </template>
   </VEntity>
 </template>

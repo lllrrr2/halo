@@ -1,15 +1,26 @@
 // block
 export * from "./block";
 
-// bubble
-export * from "./bubble";
-
 // toolbar
 export * from "./toolbar";
+
+// drag
+export * from "./drag";
 
 // toolbox
 export * from "./toolbox";
 
+// upload
+export * from "./upload";
+
+// bubble
+export * from "./bubble";
+
+// base
+export * from "./base";
+
+// keyboard shortcuts
+export * from "./keyboard-shortcuts";
+
 export { default as RichTextEditor } from "./Editor.vue";
-export * from "./EditorHeader.vue";
-export * from "./EditorBubbleMenu.vue";
+export { default as EditorHeader } from "./EditorHeader.vue";

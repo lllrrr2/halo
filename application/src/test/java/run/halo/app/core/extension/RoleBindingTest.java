@@ -1,7 +1,6 @@
 package run.halo.app.core.extension;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.Instant;
 import java.util.List;
@@ -40,4 +39,19 @@ class RoleBindingTest {
         assertFalse(RoleBinding.containsUser("non-exist-fake-name").test(binding));
     }
 
+    @Test
+    void subjectToStringTest() {
+        assertEquals("User/fake-name", createSubject("fake-name", "", "User").toString());
+        assertEquals(
+                "fake.group/User/fake-name",
+                createSubject("fake-name", "fake.group", "User").toString());
+    }
+
+    RoleBinding.Subject createSubject(String name, String apiGroup, String kind) {
+        var subject = new RoleBinding.Subject();
+        subject.setName(name);
+        subject.setApiGroup(apiGroup);
+        subject.setKind(kind);
+        return subject;
+    }
 }

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.boot.autoconfigure.thymeleaf.ThymeleafProperties;
+import org.springframework.boot.thymeleaf.autoconfigure.ThymeleafProperties;
 import org.springframework.util.ResourceUtils;
 import run.halo.app.theme.ThemeContext;
 
@@ -31,10 +31,8 @@ class DefaultThemeTemplateAvailabilityProviderTest {
         var themePath = Path.of(themeUrl.toURI());
 
         when(thymeleafProperties.getSuffix()).thenReturn(".html");
-        var themeContext = ThemeContext.builder()
-            .name("default")
-            .path(themePath)
-            .build();
+        var themeContext =
+                ThemeContext.builder().name("default").path(themePath).build();
         boolean templateAvailable = provider.isTemplateAvailable(themeContext, "fake");
         assertFalse(templateAvailable);
 

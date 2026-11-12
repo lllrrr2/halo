@@ -1,6 +1,6 @@
-import DialogComponent from "./Dialog.vue";
 import { createVNode, render, type Component } from "vue";
-import type { DialogProps } from "./interface";
+import DialogComponent from "./Dialog.vue";
+import type { DialogProps } from "./types";
 
 export type DialogApiProps = Omit<DialogProps, "type" | "visible">;
 
@@ -19,17 +19,32 @@ const defaultProps: DialogProps = {
   visible: false,
 };
 
+const DIALOG_CONTAINER_CLASS = ".dialog-container";
+const MODAL_WRAPPER_CLASS = ".modal-wrapper";
+
+function getOrCreateContainer() {
+  let container = document.body.querySelector(DIALOG_CONTAINER_CLASS);
+  if (!container) {
+    container = document.createElement("div");
+    container.className = "dialog-container";
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
 const dialog: DialogEntry = (userProps: DialogProps) => {
   const props = {
     ...defaultProps,
     ...userProps,
   };
 
-  let container = document.body.querySelector(".dialog-container");
-  if (!container) {
-    container = document.createElement("div");
-    container.className = "dialog-container";
-    document.body.appendChild(container);
+  const container = getOrCreateContainer();
+
+  if (
+    props.uniqueId &&
+    container.querySelector(`[data-unique-id="${props.uniqueId}"]`)
+  ) {
+    return;
   }
 
   const { vnode, container: hostContainer } = createVNodeComponent(
@@ -46,10 +61,15 @@ const dialog: DialogEntry = (userProps: DialogProps) => {
   }
 
   if (vnode?.props) {
-    // close emit
-
     vnode.props.onClose = () => {
-      container?.remove();
+      const modals = container.querySelectorAll(MODAL_WRAPPER_CLASS);
+
+      if (modals.length > 1) {
+        hostContainer.firstElementChild?.remove();
+      } else {
+        container.remove();
+      }
+
       render(null, hostContainer);
     };
   }

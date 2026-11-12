@@ -1,11 +1,11 @@
-import { fileURLToPath, URL } from "url";
-
-import { defineConfig, type Plugin } from "vite";
+import path from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import Vue from "@vitejs/plugin-vue";
 import VueJsx from "@vitejs/plugin-vue-jsx";
+import Dts from "unplugin-dts/vite";
 import Icons from "unplugin-icons/vite";
-import Dts from "vite-plugin-dts";
-import path from "path";
+import { defineConfig, type Plugin } from "vite-plus";
+import { configDefaults } from "vite-plus";
 
 export default defineConfig({
   plugins: [
@@ -13,14 +13,15 @@ export default defineConfig({
     VueJsx(),
     Icons({ compiler: "vue3" }),
     Dts({
-      tsConfigFilePath: "./tsconfig.app.json",
+      processor: "vue",
+      tsconfigPath: "./tsconfig.app.json",
       entryRoot: "./src",
-      outputDir: "./dist",
+      outDirs: "./dist",
       insertTypesEntry: true,
     }) as Plugin,
   ],
   define: {
-    "process.env": process.env,
+    "process.env.NODE_ENV": '"production"',
   },
   resolve: {
     alias: {
@@ -33,7 +34,8 @@ export default defineConfig({
       entry: path.resolve(__dirname, "src/index.ts"),
       name: "HaloComponents",
       formats: ["es", "iife"],
-      fileName: (format) => `halo-components.${format}.js`,
+      fileName: (format) => `index.${format}.js`,
+      cssFileName: "style",
     },
     rollupOptions: {
       external: [
@@ -52,9 +54,18 @@ export default defineConfig({
           "@vueuse/router": "VueUse",
         },
         exports: "named",
-        generatedCode: "es5",
       },
     },
     sourcemap: true,
+  },
+  test: {
+    // Vitest v4 compatibility: preserve mock call history.
+    // Remove after tests no longer rely on calls from setup or earlier tests.
+    // https://viteplus.dev/guide/vitest-v5#remove-unneeded-compatibility-settings
+    // https://vitest.dev/guide/migration/#clearmocks-is-enabled-by-default
+    clearMocks: false,
+    environment: "jsdom",
+    exclude: [...configDefaults.exclude],
+    root: fileURLToPath(new URL("./", import.meta.url)),
   },
 });

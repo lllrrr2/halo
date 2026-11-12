@@ -1,40 +1,63 @@
 package run.halo.app.security.authentication.twofactor;
 
-import org.springframework.context.MessageSource;
+import static org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers.pathMatchers;
+
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.web.server.authentication.AuthenticationWebFilter;
 import org.springframework.security.web.server.context.ServerSecurityContextRepository;
+import org.springframework.security.web.server.savedrequest.ServerRequestCache;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.server.ServerResponse;
+import run.halo.app.security.LoginHandlerEnhancer;
 import run.halo.app.security.authentication.SecurityConfigurer;
 import run.halo.app.security.authentication.twofactor.totp.TotpAuthService;
-import run.halo.app.security.authentication.twofactor.totp.TotpAuthenticationFilter;
+import run.halo.app.security.authentication.twofactor.totp.TotpAuthenticationManager;
+import run.halo.app.security.authentication.twofactor.totp.TotpCodeAuthenticationConverter;
 
 @Component
+@Order(0)
 public class TwoFactorAuthSecurityConfigurer implements SecurityConfigurer {
 
     private final ServerSecurityContextRepository securityContextRepository;
+
     private final TotpAuthService totpAuthService;
 
-    private final ServerResponse.Context context;
+    private final LoginHandlerEnhancer loginHandlerEnhancer;
 
-    private final MessageSource messageSource;
+    private final ServerRequestCache serverRequestCache;
+
+    private final RateLimiterRegistry rateLimiterRegistry;
+
+    private final TotpAuthenticationFailureHandler failureHandler;
 
     public TwoFactorAuthSecurityConfigurer(
-        ServerSecurityContextRepository securityContextRepository,
-        TotpAuthService totpAuthService, ServerResponse.Context context,
-        MessageSource messageSource) {
+            ServerSecurityContextRepository securityContextRepository,
+            TotpAuthService totpAuthService,
+            LoginHandlerEnhancer loginHandlerEnhancer,
+            ServerRequestCache serverRequestCache,
+            RateLimiterRegistry rateLimiterRegistry,
+            TotpAuthenticationFailureHandler failureHandler) {
         this.securityContextRepository = securityContextRepository;
         this.totpAuthService = totpAuthService;
-        this.context = context;
-        this.messageSource = messageSource;
+        this.loginHandlerEnhancer = loginHandlerEnhancer;
+        this.serverRequestCache = serverRequestCache;
+        this.rateLimiterRegistry = rateLimiterRegistry;
+        this.failureHandler = failureHandler;
     }
 
     @Override
     public void configure(ServerHttpSecurity http) {
-        var filter = new TotpAuthenticationFilter(securityContextRepository, totpAuthService,
-            context, messageSource);
-        http.addFilterAfter(filter, SecurityWebFiltersOrder.AUTHENTICATION);
+        var authManager = new TotpAuthenticationManager(totpAuthService);
+        var filter = new AuthenticationWebFilter(authManager);
+        filter.setRequiresAuthenticationMatcher(pathMatchers(HttpMethod.POST, "/challenges/two-factor/totp"));
+        filter.setSecurityContextRepository(securityContextRepository);
+        filter.setServerAuthenticationConverter(new TotpCodeAuthenticationConverter(rateLimiterRegistry));
+        filter.setAuthenticationSuccessHandler(
+                new TotpAuthenticationSuccessHandler(loginHandlerEnhancer, serverRequestCache));
+        filter.setAuthenticationFailureHandler(failureHandler);
+        http.addFilterAt(filter, SecurityWebFiltersOrder.AUTHENTICATION);
     }
-
 }

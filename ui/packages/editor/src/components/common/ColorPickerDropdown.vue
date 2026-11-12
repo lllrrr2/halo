@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { Dropdown as VDropdown } from "floating-vue";
-import MdiChevronRight from "~icons/mdi/chevron-right";
-import MdiPalette from "~icons/mdi/palette";
-import { Sketch } from "@ckpack/vue-color";
 import type { Payload } from "@ckpack/vue-color";
+import { Sketch } from "@ckpack/vue-color";
+import { VDropdown } from "@halo-dev/components";
 import tailwindcssColors from "tailwindcss/colors";
+import MingcutePaletteLine from "~icons/mingcute/palette-line";
+import MingcuteRightLine from "~icons/mingcute/right-line";
 import { i18n } from "@/locales";
 
 interface Color {
@@ -12,18 +12,8 @@ interface Color {
   name: string;
 }
 
-withDefaults(
-  defineProps<{
-    modelValue?: string;
-  }>(),
-  {
-    modelValue: undefined,
-  }
-);
-
-const emit = defineEmits<{
-  (emit: "update:modelValue", value?: string): void;
-}>();
+const modelValue = defineModel<string | undefined>({ default: undefined });
+const shown = defineModel<boolean>("shown", { default: false });
 
 function getColors(): Color[] {
   const result: Color[] = [];
@@ -69,7 +59,7 @@ function getColors(): Color[] {
 }
 
 function handleSetColor(color: string) {
-  emit("update:modelValue", color);
+  modelValue.value = color;
 }
 
 function onColorChange(color: Payload) {
@@ -78,7 +68,7 @@ function onColorChange(color: Payload) {
 </script>
 
 <template>
-  <VDropdown class="inline-flex">
+  <VDropdown v-model:shown="shown" class="inline-flex items-center">
     <slot />
     <template #popper>
       <slot name="prefix" />
@@ -87,25 +77,25 @@ function onColorChange(color: Payload) {
           v-for="item in getColors()"
           :key="item.color"
           :style="{ backgroundColor: item.color }"
-          class="h-5 w-5 rounded-sm cursor-pointer hover:ring-1 ring-offset-1 ring-gray-300"
+          class="size-5 cursor-pointer rounded-sm ring-gray-300 ring-offset-1 hover:ring-1"
           :title="item.name"
           @click="handleSetColor(item.color)"
         ></div>
       </div>
 
-      <VDropdown placement="right">
+      <VDropdown popper-class="[&_.v-popper\_\_inner]:!p-0" placement="right">
         <div class="p-1">
           <div
-            class="flex items-center rounded cursor-pointer hover:bg-gray-100 p-1 justify-between"
+            class="flex cursor-pointer items-center justify-between rounded p-1 text-xs text-gray-600 hover:bg-gray-100 hover:text-gray-900"
           >
             <div class="inline-flex items-center gap-2">
-              <MdiPalette />
-              <span class="text-xs text-gray-600">
+              <MingcutePaletteLine />
+              <span>
                 {{ i18n.global.t("editor.components.color_picker.more_color") }}
               </span>
             </div>
             <div>
-              <MdiChevronRight />
+              <MingcuteRightLine />
             </div>
           </div>
         </div>

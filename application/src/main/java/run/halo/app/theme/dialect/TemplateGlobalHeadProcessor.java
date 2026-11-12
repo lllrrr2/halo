@@ -9,14 +9,15 @@ import org.thymeleaf.model.IModel;
 import org.thymeleaf.model.IModelFactory;
 import org.thymeleaf.processor.element.IElementModelStructureHandler;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.theme.DefaultTemplateEnum;
 import run.halo.app.theme.router.ModelConst;
 
 /**
- * <p>Global custom head snippet injection for theme global setting.</p>
- * <p>Globally injected head snippet can be overridden by content template.</p>
+ * Global custom head snippet injection for theme global setting.
+ *
+ * <p>Globally injected head snippet can be overridden by content template.
  *
  * @author guqing
  * @since 2.0.0
@@ -25,30 +26,29 @@ import run.halo.app.theme.router.ModelConst;
 @Component
 public class TemplateGlobalHeadProcessor implements TemplateHeadProcessor {
 
-    private final SystemConfigurableEnvironmentFetcher fetcher;
+    private final SystemConfigFetcher fetcher;
 
-    public TemplateGlobalHeadProcessor(SystemConfigurableEnvironmentFetcher fetcher) {
+    public TemplateGlobalHeadProcessor(SystemConfigFetcher fetcher) {
         this.fetcher = fetcher;
     }
 
     @Override
-    public Mono<Void> process(ITemplateContext context, IModel model,
-        IElementModelStructureHandler structureHandler) {
+    public Mono<Void> process(ITemplateContext context, IModel model, IElementModelStructureHandler structureHandler) {
         final IModelFactory modelFactory = context.getModelFactory();
         return fetchCodeInjection()
-            .doOnNext(codeInjection -> {
-                String globalHeader = codeInjection.getGlobalHead();
-                if (StringUtils.isNotBlank(globalHeader)) {
-                    model.add(modelFactory.createText(globalHeader + "\n"));
-                }
+                .doOnNext(codeInjection -> {
+                    String globalHeader = codeInjection.getGlobalHead();
+                    if (StringUtils.isNotBlank(globalHeader)) {
+                        model.add(modelFactory.createText(globalHeader + "\n"));
+                    }
 
-                // add content head to model
-                String contentHeader = codeInjection.getContentHead();
-                if (StringUtils.isNotBlank(contentHeader) && isContentTemplate(context)) {
-                    model.add(modelFactory.createText(contentHeader + "\n"));
-                }
-            })
-            .then();
+                    // add content head to model
+                    String contentHeader = codeInjection.getContentHead();
+                    if (StringUtils.isNotBlank(contentHeader) && isContentTemplate(context)) {
+                        model.add(modelFactory.createText(contentHeader + "\n"));
+                    }
+                })
+                .then();
     }
 
     private Mono<SystemSetting.CodeInjection> fetchCodeInjection() {
@@ -58,6 +58,6 @@ public class TemplateGlobalHeadProcessor implements TemplateHeadProcessor {
     private boolean isContentTemplate(ITemplateContext context) {
         String templateId = (String) context.getVariable(ModelConst.TEMPLATE_ID);
         return DefaultTemplateEnum.POST.getValue().equals(templateId)
-            || DefaultTemplateEnum.SINGLE_PAGE.getValue().equals(templateId);
+                || DefaultTemplateEnum.SINGLE_PAGE.getValue().equals(templateId);
     }
 }

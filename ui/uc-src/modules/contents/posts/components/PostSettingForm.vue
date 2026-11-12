@@ -1,19 +1,23 @@
 <script lang="ts" setup>
-import { IconRefreshLine } from "@halo-dev/components";
-import type { PostFormState } from "../types";
-import { toISOString } from "@/utils/date";
-import { computed } from "vue";
 import useSlugify from "@console/composables/use-slugify";
-import { FormType } from "@/types/slug";
-import { ref } from "vue";
-import HasPermission from "@/components/permission/HasPermission.vue";
+import type { FormKitNode } from "@formkit/core";
+import { publicApiClient } from "@halo-dev/api-client";
+import { IconRefreshLine } from "@halo-dev/components";
+import { FormType, utils } from "@halo-dev/ui-shared";
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import type { PostFormState } from "../types";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
+    name?: string;
     formState?: PostFormState;
     updateMode?: boolean;
   }>(),
   {
+    name: undefined,
     formState: undefined,
     updateMode: false,
   }
@@ -28,7 +32,6 @@ const internalFormState = ref<PostFormState>(
     excerptAutoGenerate: true,
     excerptRaw: "",
     allowComment: true,
-    pinned: false,
     visible: "PUBLIC",
     publishTime: undefined,
     cover: undefined,
@@ -42,7 +45,9 @@ const emit = defineEmits<{
 function onSubmit(data: PostFormState) {
   emit("submit", {
     ...data,
-    publishTime: data.publishTime ? toISOString(data.publishTime) : undefined,
+    publishTime: data.publishTime
+      ? utils.date.toISOString(data.publishTime)
+      : undefined,
   });
 }
 
@@ -60,9 +65,47 @@ const { handleGenerateSlug } = useSlugify(
   computed(() => !props.updateMode),
   FormType.POST
 );
+
+// fixme: check if slug is unique
+// Finally, we need to check if the slug is unique in the database
+async function slugUniqueValidation(node: FormKitNode) {
+  const value = node.value;
+  if (!value) {
+    return true;
+  }
+
+  const fieldSelector = [`spec.slug=${value}`];
+
+  if (props.name) {
+    fieldSelector.push(`metadata.name!=${props.name}`);
+  }
+
+  const { data: postsWithSameSlug } =
+    await publicApiClient.content.post.queryPosts({
+      fieldSelector,
+      page: 1,
+      size: 1,
+    });
+
+  return !postsWithSameSlug.total;
+}
+
+const isScheduledPublish = computed(() => {
+  const { publishTime } = internalFormState.value;
+  return publishTime && new Date(publishTime) > new Date();
+});
+
+const publishTimeHelp = computed(() => {
+  return isScheduledPublish.value
+    ? t("core.post.settings.fields.publish_time.help.schedule_publish", {
+        datetime: utils.date.format(internalFormState.value.publishTime),
+      })
+    : "";
+});
 </script>
 
 <template>
+  <!-- @vue-ignore -->
   <FormKit
     id="post-setting-form"
     v-model="internalFormState"
@@ -85,20 +128,26 @@ const { handleGenerateSlug } = useSlugify(
             :label="$t('core.post.settings.fields.title.label')"
             type="text"
             name="title"
-            validation="required|length:0,100"
+            validation="required|length:0,1024"
           ></FormKit>
           <FormKit
             :label="$t('core.post.settings.fields.slug.label')"
             name="slug"
             type="text"
-            validation="required|length:0,100"
+            validation="required|length:0,1024|slugUniqueValidation"
+            :validation-rules="{ slugUniqueValidation }"
+            :validation-messages="{
+              slugUniqueValidation: $t(
+                'core.common.form.validation.slug_unique'
+              ),
+            }"
             :help="$t('core.post.settings.fields.slug.help')"
           >
             <template #suffix>
               <div
                 v-tooltip="$t('core.post.settings.fields.slug.refresh_message')"
                 class="group flex h-full cursor-pointer items-center border-l px-3 transition-all hover:bg-gray-100"
-                @click="handleGenerateSlug(true, FormType.POST)"
+                @click="handleGenerateSlug(true)"
               >
                 <IconRefreshLine
                   class="h-4 w-4 text-gray-500 group-hover:text-gray-700"
@@ -120,13 +169,9 @@ const { handleGenerateSlug } = useSlugify(
           />
           <FormKit
             :value="true"
-            :options="[
-              { label: $t('core.common.radio.yes'), value: true },
-              { label: $t('core.common.radio.no'), value: false },
-            ]"
             name="excerptAutoGenerate"
             :label="$t('core.post.settings.fields.auto_generate_excerpt.label')"
-            type="radio"
+            type="checkbox"
           >
           </FormKit>
           <FormKit
@@ -134,9 +179,23 @@ const { handleGenerateSlug } = useSlugify(
             :label="$t('core.post.settings.fields.raw_excerpt.label')"
             name="excerptRaw"
             type="textarea"
-            :rows="5"
+            auto-height
+            :max-auto-height="200"
             validation="length:0,1024"
           ></FormKit>
+          <HasPermission
+            :permissions="['system:attachments:view', 'uc:attachments:manage']"
+          >
+            <FormKit
+              name="cover"
+              :label="$t('core.post.settings.fields.cover.label')"
+              type="attachment"
+              width="50%"
+              aspect-ratio="16/9"
+              :accepts="['image/*']"
+              validation="length:0,1024"
+            ></FormKit>
+          </HasPermission>
         </div>
       </div>
 
@@ -155,21 +214,8 @@ const { handleGenerateSlug } = useSlugify(
         <div class="mt-5 divide-y divide-gray-100 md:col-span-3 md:mt-0">
           <FormKit
             name="allowComment"
-            :options="[
-              { label: $t('core.common.radio.yes'), value: true },
-              { label: $t('core.common.radio.no'), value: false },
-            ]"
             :label="$t('core.post.settings.fields.allow_comment.label')"
-            type="radio"
-          ></FormKit>
-          <FormKit
-            :options="[
-              { label: $t('core.common.radio.yes'), value: true },
-              { label: $t('core.common.radio.no'), value: false },
-            ]"
-            :label="$t('core.post.settings.fields.pinned.label')"
-            name="pinned"
-            type="radio"
+            type="checkbox"
           ></FormKit>
           <FormKit
             :options="[
@@ -189,16 +235,8 @@ const { handleGenerateSlug } = useSlugify(
             type="datetime-local"
             min="0000-01-01T00:00"
             max="9999-12-31T23:59"
+            :help="publishTimeHelp"
           ></FormKit>
-          <HasPermission :permissions="['system:attachments:view']">
-            <FormKit
-              name="cover"
-              :label="$t('core.post.settings.fields.cover.label')"
-              type="attachment"
-              :accepts="['image/*']"
-              validation="length:0,1024"
-            ></FormKit>
-          </HasPermission>
         </div>
       </div>
     </div>

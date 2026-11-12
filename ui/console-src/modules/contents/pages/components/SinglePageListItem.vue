@@ -1,34 +1,38 @@
 <script lang="ts" setup>
-import {
-  IconEye,
-  IconEyeOff,
-  IconExternalLinkLine,
-  VSpace,
-  Dialog,
-  VStatusDot,
-  VEntity,
-  VEntityField,
-  Toast,
-  VDropdownItem,
-  VDropdownDivider,
-} from "@halo-dev/components";
-import { computed, ref } from "vue";
+import { useEntityFieldItemExtensionPoint } from "@console/composables/use-entity-extension-points";
+import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
 import type { ListedSinglePage, SinglePage } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
-import { formatDatetime } from "@/utils/date";
-import { RouterLink } from "vue-router";
-import { cloneDeep } from "lodash-es";
-import { usePermission } from "@/utils/permission";
-import { singlePageLabels } from "@/constants/labels";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { useI18n } from "vue-i18n";
-import { inject } from "vue";
+import { coreApiClient } from "@halo-dev/api-client";
+import {
+  Dialog,
+  Toast,
+  VDropdownDivider,
+  VDropdownItem,
+  VEntity,
+} from "@halo-dev/components";
+import {
+  utils,
+  type EntityFieldItem,
+  type OperationItem,
+} from "@halo-dev/ui-shared";
+import { useQueryClient } from "@tanstack/vue-query";
 import type { Ref } from "vue";
-import ContributorList from "../../_components/ContributorList.vue";
+import { computed, inject, markRaw, ref, toRefs } from "vue";
+import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
+import EntityFieldItems from "@/components/entity-fields/EntityFieldItems.vue";
+import StatusDotField from "@/components/entity-fields/StatusDotField.vue";
+import EntityDropdownItems from "@/components/entity/EntityDropdownItems.vue";
+import ContributorsField from "./entity-fields/ContributorsField.vue";
+import CoverField from "./entity-fields/CoverField.vue";
+import PublishStatusField from "./entity-fields/PublishStatusField.vue";
+import PublishTimeField from "./entity-fields/PublishTimeField.vue";
+import TitleField from "./entity-fields/TitleField.vue";
+import VisibleField from "./entity-fields/VisibleField.vue";
 
-const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
 const queryClient = useQueryClient();
+const router = useRouter();
 
 const props = withDefaults(
   defineProps<{
@@ -40,62 +44,13 @@ const props = withDefaults(
   }
 );
 
+const { singlePage } = toRefs(props);
+
 const emit = defineEmits<{
-  (event: "open-setting-modal", post: SinglePage): void;
+  (event: "open-setting-modal", singlePage: SinglePage): void;
 }>();
 
 const selectedPageNames = inject<Ref<string[]>>("selectedPageNames", ref([]));
-
-const externalUrl = computed(() => {
-  const { metadata, status } = props.singlePage.page;
-  if (metadata.labels?.[singlePageLabels.PUBLISHED] === "true") {
-    return status?.permalink;
-  }
-  return `/preview/singlepages/${metadata.name}`;
-});
-
-const publishStatus = computed(() => {
-  const { labels } = props.singlePage.page.metadata;
-  return labels?.[singlePageLabels.PUBLISHED] === "true"
-    ? t("core.page.filters.status.items.published")
-    : t("core.page.filters.status.items.draft");
-});
-
-const isPublishing = computed(() => {
-  const { spec, status, metadata } = props.singlePage.page;
-  return (
-    (spec.publish &&
-      metadata.labels?.[singlePageLabels.PUBLISHED] !== "true") ||
-    (spec.releaseSnapshot === spec.headSnapshot && status?.inProgress)
-  );
-});
-
-const { mutate: changeVisibleMutation } = useMutation({
-  mutationFn: async (singlePage: SinglePage) => {
-    const { data } =
-      await apiClient.extension.singlePage.getcontentHaloRunV1alpha1SinglePage({
-        name: singlePage.metadata.name,
-      });
-    data.spec.visible = data.spec.visible === "PRIVATE" ? "PUBLIC" : "PRIVATE";
-    await apiClient.extension.singlePage.updatecontentHaloRunV1alpha1SinglePage(
-      {
-        name: singlePage.metadata.name,
-        singlePage: data,
-      },
-      {
-        mute: true,
-      }
-    );
-    await queryClient.invalidateQueries({ queryKey: ["singlePages"] });
-  },
-  retry: 3,
-  onSuccess: () => {
-    Toast.success(t("core.common.toast.operation_success"));
-  },
-  onError: () => {
-    Toast.error(t("core.common.toast.operation_failed"));
-  },
-});
 
 const handleDelete = async () => {
   Dialog.warning({
@@ -105,26 +60,138 @@ const handleDelete = async () => {
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     onConfirm: async () => {
-      const singlePageToUpdate = cloneDeep(props.singlePage.page);
-      singlePageToUpdate.spec.deleted = true;
-      await apiClient.extension.singlePage.updatecontentHaloRunV1alpha1SinglePage(
-        {
-          name: props.singlePage.page.metadata.name,
-          singlePage: singlePageToUpdate,
-        }
-      );
+      await coreApiClient.content.singlePage.patchSinglePage({
+        name: props.singlePage.page.metadata.name,
+        jsonPatchInner: [
+          {
+            op: "add",
+            path: "/spec/deleted",
+            value: true,
+          },
+        ],
+      });
+
       await queryClient.invalidateQueries({ queryKey: ["singlePages"] });
 
       Toast.success(t("core.common.toast.delete_success"));
     },
   });
 };
+
+const { data: fields } = useEntityFieldItemExtensionPoint<ListedSinglePage>(
+  "single-page:list-item:field:create",
+  singlePage,
+  computed((): EntityFieldItem[] => [
+    {
+      priority: 10,
+      position: "start",
+      component: markRaw(CoverField),
+      hidden: !props.singlePage.page.spec.cover,
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+    {
+      priority: 20,
+      position: "start",
+      component: markRaw(TitleField),
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+    {
+      priority: 10,
+      position: "end",
+      component: markRaw(ContributorsField),
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+    {
+      priority: 20,
+      position: "end",
+      component: markRaw(PublishStatusField),
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+    {
+      priority: 30,
+      position: "end",
+      component: markRaw(VisibleField),
+      permissions: ["system:singlepages:manage"],
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+    {
+      priority: 40,
+      position: "end",
+      component: markRaw(StatusDotField),
+      props: {
+        tooltip: t("core.common.status.deleting"),
+        state: "warning",
+        animate: true,
+      },
+      hidden: !props.singlePage?.page?.spec.deleted,
+    },
+    {
+      priority: 50,
+      position: "end",
+      component: markRaw(PublishTimeField),
+      hidden: !props.singlePage.page.spec.publishTime,
+      props: {
+        singlePage: props.singlePage,
+      },
+    },
+  ])
+);
+
+const { data: operationItems } =
+  useOperationItemExtensionPoint<ListedSinglePage>(
+    "single-page:list-item:operation:create",
+    singlePage,
+    computed((): OperationItem<ListedSinglePage>[] => [
+      {
+        priority: 0,
+        component: markRaw(VDropdownItem),
+        label: t("core.common.buttons.edit"),
+        action: async () => {
+          router.push({
+            name: "SinglePageEditor",
+            query: { name: props.singlePage.page.metadata.name },
+          });
+        },
+      },
+      {
+        priority: 10,
+        component: markRaw(VDropdownItem),
+        label: t("core.common.buttons.setting"),
+        action: () => {
+          emit("open-setting-modal", props.singlePage.page);
+        },
+      },
+      {
+        priority: 20,
+        component: markRaw(VDropdownDivider),
+      },
+      {
+        priority: 30,
+        component: markRaw(VDropdownItem),
+        props: {
+          type: "danger",
+        },
+        label: t("core.common.buttons.delete"),
+        action: handleDelete,
+      },
+    ])
+  );
 </script>
 
 <template>
   <VEntity :is-selected="isSelected">
     <template
-      v-if="currentUserHasPermission(['system:singlepages:manage'])"
+      v-if="utils.permission.has(['system:singlepages:manage'])"
       #checkbox
     >
       <input
@@ -134,122 +201,19 @@ const handleDelete = async () => {
       />
     </template>
     <template #start>
-      <VEntityField
-        :title="singlePage.page.spec.title"
-        :route="{
-          name: 'SinglePageEditor',
-          query: { name: singlePage.page.metadata.name },
-        }"
-      >
-        <template #extra>
-          <VSpace>
-            <RouterLink
-              v-if="singlePage.page.status?.inProgress"
-              v-tooltip="$t('core.common.tooltips.unpublished_content_tip')"
-              :to="{
-                name: 'SinglePageEditor',
-                query: { name: singlePage.page.metadata.name },
-              }"
-              class="flex items-center"
-            >
-              <VStatusDot state="success" animate />
-            </RouterLink>
-            <a
-              target="_blank"
-              :href="externalUrl"
-              class="hidden text-gray-600 transition-all hover:text-gray-900 group-hover:inline-block"
-            >
-              <IconExternalLinkLine class="h-3.5 w-3.5" />
-            </a>
-          </VSpace>
-        </template>
-        <template #description>
-          <div class="flex w-full flex-col gap-1">
-            <VSpace class="w-full">
-              <span class="text-xs text-gray-500">
-                {{
-                  $t("core.page.list.fields.visits", {
-                    visits: singlePage.stats.visit || 0,
-                  })
-                }}
-              </span>
-              <span class="text-xs text-gray-500">
-                {{
-                  $t("core.page.list.fields.comments", {
-                    comments: singlePage.stats.totalComment || 0,
-                  })
-                }}
-              </span>
-            </VSpace>
-          </div>
-        </template>
-      </VEntityField>
+      <EntityFieldItems :fields="fields?.start || []" />
     </template>
     <template #end>
-      <VEntityField>
-        <template #description>
-          <ContributorList :contributors="singlePage.contributors" />
-        </template>
-      </VEntityField>
-      <VEntityField :description="publishStatus">
-        <template v-if="isPublishing" #description>
-          <VStatusDot :text="$t('core.common.tooltips.publishing')" animate />
-        </template>
-      </VEntityField>
-      <VEntityField>
-        <template #description>
-          <IconEye
-            v-if="singlePage.page.spec.visible === 'PUBLIC'"
-            v-tooltip="$t('core.page.filters.visible.items.public')"
-            class="cursor-pointer text-sm transition-all hover:text-blue-600"
-            @click="changeVisibleMutation(singlePage.page)"
-          />
-          <IconEyeOff
-            v-if="singlePage.page.spec.visible === 'PRIVATE'"
-            v-tooltip="$t('core.page.filters.visible.items.private')"
-            class="cursor-pointer text-sm transition-all hover:text-blue-600"
-            @click="changeVisibleMutation(singlePage.page)"
-          />
-        </template>
-      </VEntityField>
-      <VEntityField v-if="singlePage?.page?.spec.deleted">
-        <template #description>
-          <VStatusDot
-            v-tooltip="$t('core.common.status.deleting')"
-            state="warning"
-            animate
-          />
-        </template>
-      </VEntityField>
-      <VEntityField>
-        <template #description>
-          <span class="truncate text-xs tabular-nums text-gray-500">
-            {{ formatDatetime(singlePage.page.spec.publishTime) }}
-          </span>
-        </template>
-      </VEntityField>
+      <EntityFieldItems :fields="fields?.end || []" />
     </template>
     <template
-      v-if="currentUserHasPermission(['system:singlepages:manage'])"
+      v-if="utils.permission.has(['system:singlepages:manage'])"
       #dropdownItems
     >
-      <VDropdownItem
-        @click="
-          $router.push({
-            name: 'SinglePageEditor',
-            query: { name: singlePage.page.metadata.name },
-          })
-        "
-      >
-        {{ $t("core.common.buttons.edit") }}
-      </VDropdownItem>
-      <VDropdownItem @click="emit('open-setting-modal', singlePage.page)">
-        {{ $t("core.common.buttons.setting") }}
-      </VDropdownItem>
-      <VDropdownDivider />
-      <VDropdownItem type="danger" @click="handleDelete">
-        {{ $t("core.common.buttons.delete") }}
-      </VDropdownItem>
+      <EntityDropdownItems
+        :dropdown-items="operationItems || []"
+        :item="singlePage"
+      />
     </template>
   </VEntity>
 </template>

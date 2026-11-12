@@ -1,12 +1,15 @@
 package run.halo.app.theme;
 
+import static run.halo.app.theme.HaloViewResolver.HaloView.CONTEXT_VIEW_KEY;
+
+import java.util.Optional;
 import org.thymeleaf.context.IExpressionContext;
 import org.thymeleaf.spring6.expression.SPELVariableExpressionEvaluator;
 import org.thymeleaf.standard.expression.IStandardVariableExpression;
 import org.thymeleaf.standard.expression.IStandardVariableExpressionEvaluator;
 import org.thymeleaf.standard.expression.StandardExpressionExecutionContext;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
+import reactor.util.context.ContextView;
+import run.halo.app.infra.utils.ReactiveUtils;
 
 /**
  * Reactive SPEL variable expression evaluator.
@@ -14,31 +17,34 @@ import reactor.core.publisher.Mono;
  * @author guqing
  * @since 2.0.0
  */
-public class ReactiveSpelVariableExpressionEvaluator
-    implements IStandardVariableExpressionEvaluator {
+public class ReactiveSpelVariableExpressionEvaluator implements IStandardVariableExpressionEvaluator {
 
-    private final SPELVariableExpressionEvaluator delegate =
-        SPELVariableExpressionEvaluator.INSTANCE;
+    private final IStandardVariableExpressionEvaluator delegate;
 
     public static final ReactiveSpelVariableExpressionEvaluator INSTANCE =
-        new ReactiveSpelVariableExpressionEvaluator();
+            new ReactiveSpelVariableExpressionEvaluator();
+
+    public ReactiveSpelVariableExpressionEvaluator(IStandardVariableExpressionEvaluator delegate) {
+        this.delegate = delegate;
+    }
+
+    public ReactiveSpelVariableExpressionEvaluator() {
+        this(SPELVariableExpressionEvaluator.INSTANCE);
+    }
 
     @Override
-    public Object evaluate(IExpressionContext context, IStandardVariableExpression expression,
-        StandardExpressionExecutionContext expContext) {
-        Object returnValue = delegate.evaluate(context, expression, expContext);
-        if (returnValue == null) {
-            return null;
-        }
+    public Object evaluate(
+            IExpressionContext context,
+            IStandardVariableExpression expression,
+            StandardExpressionExecutionContext expContext) {
+        var returnValue = delegate.evaluate(context, expression, expContext);
 
-        Class<?> clazz = returnValue.getClass();
-        // Note that: 3 instanceof Foo -> syntax error
-        if (Mono.class.isAssignableFrom(clazz)) {
-            return ((Mono<?>) returnValue).block();
-        }
-        if (Flux.class.isAssignableFrom(clazz)) {
-            return ((Flux<?>) returnValue).collectList().block();
-        }
-        return returnValue;
+        var contextView = (ContextView) Optional.ofNullable(context.getVariable(CONTEXT_VIEW_KEY))
+                .filter(ContextView.class::isInstance)
+                .orElse(null);
+
+        return Optional.ofNullable(returnValue)
+                .map(value -> ReactiveUtils.blockReactiveValue(value, contextView))
+                .orElse(null);
     }
 }

@@ -22,6 +22,16 @@ public interface ExtensionStoreClient {
 
     Page<ExtensionStore> listByNamePrefix(String prefix, Pageable pageable);
 
+    /**
+     * Lists ExtensionStores by name prefix, after the given cursor name, and limit the result size.
+     *
+     * @param prefix the name prefix
+     * @param nameCursor cursor name, exclusive and can be null
+     * @param limit the max result size
+     * @return a list of extension stores
+     */
+    List<ExtensionStore> listBy(String prefix, String nameCursor, int limit);
+
     List<ExtensionStore> listByNames(List<String> names);
 
     /**
@@ -60,5 +70,5 @@ public interface ExtensionStoreClient {
      */
     ExtensionStore delete(String name, Long version);
 
-    //TODO add watch method here.
+    // TODO add watch method here.
 }

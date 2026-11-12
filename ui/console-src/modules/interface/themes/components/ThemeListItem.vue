@@ -1,29 +1,26 @@
 <script lang="ts" setup>
+import { invalidateThemeQueries } from "@console/composables/use-activated-theme";
+import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
+import type { Theme } from "@halo-dev/api-client";
+import { consoleApiClient, coreApiClient } from "@halo-dev/api-client";
 import {
-  VTag,
-  VStatusDot,
   Toast,
-  VDropdownItem,
+  VButton,
   VDropdown,
   VDropdownDivider,
-  VButton,
+  VDropdownItem,
   VSpace,
+  VStatusDot,
+  VTag,
 } from "@halo-dev/components";
-import type { Theme } from "@halo-dev/api-client";
-import { apiClient } from "@/utils/api-client";
-import { toRefs, ref, inject, type Ref } from "vue";
-import { useThemeLifeCycle } from "../composables/use-theme";
-import { usePermission } from "@/utils/permission";
-import { useI18n } from "vue-i18n";
+import { utils, type OperationItem } from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
-import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
-import { markRaw } from "vue";
-import UninstallOperationItem from "./operation/UninstallOperationItem.vue";
-import { computed } from "vue";
-import type { OperationItem } from "@halo-dev/console-shared";
+import { computed, inject, markRaw, ref, toRefs, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { useThemeLifeCycle } from "../composables/use-theme";
 import MoreOperationItem from "./operation/MoreOperationItem.vue";
+import UninstallOperationItem from "./operation/UninstallOperationItem.vue";
 
-const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
 const queryClient = useQueryClient();
 
@@ -47,10 +44,14 @@ const emit = defineEmits<{
 
 const { theme } = toRefs(props);
 
+const screenshot = computed(() => theme.value.status?.screenshot);
+const logo = computed(() => theme.value.spec.logo);
+
 const activeTabId = inject<Ref<string>>("activeTabId", ref(""));
 
 const {
   isActivated,
+  isActivationKnown,
   getFailedMessage,
   handleActiveTheme,
   handleResetSettingConfig,
@@ -63,13 +64,12 @@ const handleCreateTheme = async () => {
   try {
     creating.value = true;
 
-    const { data } =
-      await apiClient.extension.theme.createthemeHaloRunV1alpha1Theme({
-        theme: props.theme,
-      });
+    const { data } = await coreApiClient.theme.theme.createTheme({
+      theme: props.theme,
+    });
 
     // create theme settings
-    apiClient.theme.reload({ name: data.metadata.name });
+    await consoleApiClient.theme.theme.reload({ name: data.metadata.name });
 
     activeTabId.value = "installed";
 
@@ -78,12 +78,11 @@ const handleCreateTheme = async () => {
     console.error("Failed to create theme", error);
   } finally {
     creating.value = false;
-    queryClient.invalidateQueries({ queryKey: ["installed-themes"] });
-    queryClient.invalidateQueries({ queryKey: ["not-installed-themes"] });
+    void invalidateThemeQueries(queryClient);
   }
 };
 
-const { operationItems } = useOperationItemExtensionPoint<Theme>(
+const { data: operationItems } = useOperationItemExtensionPoint<Theme>(
   "theme:list-item:operation:create",
   theme,
   computed((): OperationItem<Theme>[] => [
@@ -95,7 +94,7 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
       },
       action: () => handleActiveTheme(true),
       label: t("core.common.buttons.activate"),
-      hidden: isActivated.value,
+      hidden: !isActivationKnown.value || isActivated.value,
       permissions: ["system:themes:manage"],
     },
     {
@@ -156,16 +155,29 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
     <div class="col-span-2">
       <div class="relative block">
         <div class="aspect-h-9 aspect-w-16">
+          <div v-if="screenshot" class="overflow-hidden rounded bg-gray-100">
+            <img
+              class="h-full w-full object-cover"
+              :src="screenshot"
+              :alt="theme.spec.displayName"
+            />
+          </div>
           <div
+            v-else
             class="transform-gpu rounded-none bg-cover bg-center bg-no-repeat sm:rounded"
             :style="{
-              backgroundImage: `url(${theme.spec.logo})`,
+              backgroundImage: logo ? `url(${logo})` : undefined,
             }"
           >
             <div
               class="flex h-full w-full items-center justify-center rounded-none backdrop-blur-3xl sm:rounded"
             >
-              <img class="h-16 w-16 rounded" :src="theme.spec.logo" />
+              <img
+                v-if="logo"
+                class="h-16 w-16 rounded"
+                :src="logo"
+                :alt="theme.spec.displayName"
+              />
             </div>
           </div>
         </div>
@@ -234,7 +246,7 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
                 <component
                   :is="item.component"
                   v-if="
-                    !item.hidden && currentUserHasPermission(item.permissions)
+                    !item.hidden && utils.permission.has(item.permissions || [])
                   "
                   :key="`${theme.metadata.name}-${item.label}-${item.priority}`"
                   v-bind="item.props"
@@ -246,7 +258,7 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
               <template v-else>
                 <VDropdown
                   v-if="
-                    !item.hidden && currentUserHasPermission(item.permissions)
+                    !item.hidden && utils.permission.has(item.permissions || [])
                   "
                   :key="`${theme.metadata.name}-${item.label}-${item.priority}`"
                 >
@@ -263,7 +275,7 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
                         :is="childItem.component"
                         v-if="
                           !childItem.hidden &&
-                          currentUserHasPermission(childItem.permissions)
+                          utils.permission.has(childItem.permissions || [])
                         "
                         :key="`${theme.metadata.name}-${childItem.label}-${childItem.priority}`"
                         v-bind="childItem.props"
@@ -278,9 +290,7 @@ const { operationItems } = useOperationItemExtensionPoint<Theme>(
             </template>
           </VSpace>
           <VButton
-            v-if="
-              !installed && currentUserHasPermission(['system:themes:manage'])
-            "
+            v-if="!installed && utils.permission.has(['system:themes:manage'])"
             size="sm"
             :loading="creating"
             @click="handleCreateTheme"

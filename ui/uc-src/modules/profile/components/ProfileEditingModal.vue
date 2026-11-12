@@ -1,105 +1,70 @@
 <script lang="ts" setup>
-// core libs
-import { ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
 import type { User } from "@halo-dev/api-client";
-
-// components
+import { ucApiClient } from "@halo-dev/api-client";
 import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import SubmitButton from "@/components/button/SubmitButton.vue";
-
-// libs
-import { cloneDeep } from "lodash-es";
-import { reset } from "@formkit/core";
-
-// hooks
-import { setFocus } from "@/formkit/utils/focus";
+import { stores } from "@halo-dev/ui-shared";
+import { cloneDeep } from "es-toolkit";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useQueryClient } from "@tanstack/vue-query";
-import { useUserStore } from "@/stores/user";
+import SubmitButton from "@/components/button/SubmitButton.vue";
+import { setFocus } from "@/formkit/utils/focus";
 import EmailVerifyModal from "./EmailVerifyModal.vue";
 
 const { t } = useI18n();
-const queryClient = useQueryClient();
-const userStore = useUserStore();
-
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-  }>(),
-  {
-    visible: false,
-  }
-);
+const currentUserStore = stores.currentUser();
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const initialFormState: User = {
-  spec: {
-    displayName: "",
-    email: "",
-    phone: "",
-    password: "",
-    bio: "",
-    disabled: false,
-    loginHistoryLimit: 0,
-  },
-  apiVersion: "v1alpha1",
-  kind: "User",
-  metadata: {
-    name: "",
-  },
-};
-
-const formState = ref<User>(cloneDeep(initialFormState));
-const saving = ref(false);
-
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset("user-form");
-};
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
-      if (userStore.currentUser)
-        formState.value = cloneDeep(userStore.currentUser);
-      setFocus("displayNameInput");
-    } else {
-      handleResetForm();
-    }
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const formState = ref<User>(
+  cloneDeep(currentUserStore.currentUser?.user) || {
+    spec: {
+      displayName: "",
+      email: "",
+      password: "",
+      bio: "",
+      disabled: false,
+      loginHistoryLimit: 0,
+    },
+    apiVersion: "v1alpha1",
+    kind: "User",
+    metadata: {
+      name: "",
+    },
   }
 );
+const isSubmitting = ref(false);
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
+onMounted(() => {
+  setFocus("displayNameInput");
+});
 
 const handleUpdateUser = async () => {
   try {
-    saving.value = true;
+    isSubmitting.value = true;
 
-    await apiClient.user.updateCurrentUser({
-      user: formState.value,
+    if (formState.value.spec.displayName) {
+      formState.value.spec.displayName =
+        formState.value.spec.displayName.trim();
+    }
+
+    await ucApiClient.user.currentUser.updateMyProfile({
+      updateMyProfileRequest: {
+        displayName: formState.value.spec.displayName,
+        bio: formState.value.spec.bio,
+      },
     });
 
-    onVisibleChange(false);
-
-    queryClient.invalidateQueries({ queryKey: ["user-detail"] });
+    modal.value?.close();
 
     Toast.success(t("core.common.toast.save_success"));
   } catch (e) {
     console.error("Failed to update profile", e);
   } finally {
-    saving.value = false;
-    userStore.fetchCurrentUser();
+    isSubmitting.value = false;
+    currentUserStore.fetchCurrentUser();
   }
 };
 
@@ -108,16 +73,17 @@ const emailVerifyModal = ref(false);
 
 async function onEmailVerifyModalClose() {
   emailVerifyModal.value = false;
-  await userStore.fetchCurrentUser();
-  if (userStore.currentUser) formState.value = cloneDeep(userStore.currentUser);
+  await currentUserStore.fetchCurrentUser();
+  if (currentUserStore.currentUser)
+    formState.value = cloneDeep(currentUserStore.currentUser.user);
 }
 </script>
 <template>
   <VModal
+    ref="modal"
     :title="$t('core.uc_profile.editing_modal.title')"
-    :visible="visible"
     :width="700"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <FormKit
       id="user-form"
@@ -172,16 +138,11 @@ async function onEmailVerifyModalClose() {
               </template>
             </FormKit>
             <FormKit
-              v-model="formState.spec.phone"
-              :label="$t('core.uc_profile.editing_modal.fields.phone.label')"
-              type="text"
-              name="phone"
-              validation="length:0,20"
-            ></FormKit>
-            <FormKit
               v-model="formState.spec.bio"
               :label="$t('core.uc_profile.editing_modal.fields.bio.label')"
               type="textarea"
+              auto-height
+              :max-auto-height="200"
               name="bio"
               validation="length:0,2048"
             ></FormKit>
@@ -193,14 +154,13 @@ async function onEmailVerifyModalClose() {
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
           @submit="$formkit.submit('user-form')"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

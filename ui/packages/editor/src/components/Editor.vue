@@ -1,13 +1,15 @@
 <script lang="ts" setup>
-import { Editor, EditorContent } from "@/tiptap/vue-3";
-import EditorHeader from "./EditorHeader.vue";
-import EditorBubbleMenu from "./EditorBubbleMenu.vue";
 import { watch, type CSSProperties, type PropType } from "vue";
 import { i18n } from "@/locales";
+import { EditorContent, VueEditor } from "@/tiptap";
+import EditorBubbleMenu from "./bubble/EditorBubbleMenu.vue";
+import EditorDragHandle from "./drag/EditorDragHandle.vue";
+import EditorHeader from "./EditorHeader.vue";
+import KeyboardShortcutHelp from "./keyboard-shortcuts/KeyboardShortcutHelp.vue";
 
 const props = defineProps({
   editor: {
-    type: Object as PropType<Editor>,
+    type: Object as PropType<VueEditor>,
     required: true,
   },
   contentStyles: {
@@ -35,23 +37,22 @@ watch(
 <template>
   <div v-if="editor" class="halo-rich-text-editor">
     <editor-bubble-menu :editor="editor" />
+    <editor-drag-handle :editor="editor" />
     <editor-header :editor="editor" />
-    <div class="h-full flex flex-row w-full overflow-hidden">
-      <div class="overflow-y-auto flex-1 bg-white relative">
-        <div v-if="$slots.content" class="editor-header-extra">
+    <keyboard-shortcut-help :editor="editor" />
+    <div class="editor-entry">
+      <div class="editor-main">
+        <div v-if="$slots.content" class="editor-main-extra">
           <slot name="content" />
         </div>
 
         <editor-content
           :editor="editor"
           :style="contentStyles"
-          class="editor-content markdown-body relative"
+          class="editor-main-content markdown-body"
         />
       </div>
-      <div
-        v-if="$slots.extra"
-        class="h-full hidden sm:!block w-72 flex-shrink-0 flex-none"
-      >
+      <div v-if="$slots.extra" class="editor-entry-extra">
         <slot name="extra"></slot>
       </div>
     </div>

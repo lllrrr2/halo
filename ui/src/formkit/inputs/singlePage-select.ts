@@ -1,29 +1,84 @@
-import { singlePageLabels } from "@/constants/labels";
-import { apiClient } from "@/utils/api-client";
 import type { FormKitNode, FormKitTypeDefinition } from "@formkit/core";
-import { select, selects, defaultIcon } from "@formkit/inputs";
+import type { FormKitInputs } from "@formkit/inputs";
+import {
+  consoleApiClient,
+  paginate,
+  type ListedSinglePage,
+  type SinglePageV1alpha1ConsoleApiListSinglePagesRequest,
+} from "@halo-dev/api-client";
+import { singlePageLabels } from "@/constants/labels";
+import { select } from "./select";
 
-function optionsHandler(node: FormKitNode) {
-  node.on("created", async () => {
-    const { data } = await apiClient.singlePage.listSinglePages({
-      labelSelector: [
-        `${singlePageLabels.DELETED}=false`,
-        `${singlePageLabels.PUBLISHED}=true`,
-      ],
-    });
+async function search({ page, size, keyword }) {
+  const { data } = await consoleApiClient.content.singlePage.listSinglePages({
+    page,
+    size,
+    keyword,
+    labelSelector: [
+      `${singlePageLabels.DELETED}=false`,
+      `${singlePageLabels.PUBLISHED}=true`,
+    ],
+  });
 
-    node.props.options = data.items.map((singlePage) => {
+  return {
+    options: data.items.map((singlePage) => {
       return {
         value: singlePage.page.metadata.name,
         label: singlePage.page.spec.title,
       };
-    });
+    }),
+    total: data.total,
+    size: data.size,
+    page: data.page,
+  };
+}
+
+async function findOptionsByValues(values: string[]) {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const singlePages = await paginate<
+    SinglePageV1alpha1ConsoleApiListSinglePagesRequest,
+    ListedSinglePage
+  >((params) => consoleApiClient.content.singlePage.listSinglePages(params), {
+    fieldSelector: [`metadata.name=(${values.join(",")})`],
+    size: 1000,
+  });
+
+  return singlePages.map((singlePage) => {
+    return {
+      value: singlePage.page.metadata.name,
+      label: singlePage.page.spec.title,
+    };
+  });
+}
+
+function optionsHandler(node: FormKitNode) {
+  node.on("created", async () => {
+    node.props = {
+      ...node.props,
+      remote: true,
+      remoteOption: {
+        search,
+        findOptionsByValues,
+      },
+      searchable: true,
+    };
   });
 }
 
 export const singlePageSelect: FormKitTypeDefinition = {
   ...select,
-  props: ["placeholder"],
   forceTypeProp: "select",
-  features: [optionsHandler, selects, defaultIcon("select", "select")],
+  features: [optionsHandler],
 };
+
+declare module "@formkit/inputs" {
+  export interface FormKitInputProps<Props extends FormKitInputs<Props>> {
+    singlePageSelect: {
+      type: "singlePageSelect";
+      value?: string;
+    };
+  }
+}

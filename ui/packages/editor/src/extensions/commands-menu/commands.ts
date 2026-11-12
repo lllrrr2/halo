@@ -1,110 +1,166 @@
+import { computePosition, flip, shift } from "@floating-ui/dom";
+import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
+import { i18n } from "@/locales";
 import {
   Extension,
+  PluginKey,
+  posToDOMRect,
   VueRenderer,
-  type Editor,
   type AnyExtension,
+  type Editor,
   type Range,
-} from "@/tiptap/vue-3";
-import Suggestion from "@tiptap/suggestion";
-import type { CommandMenuItem } from "@/types";
-import type { Instance } from "tippy.js";
+} from "@/tiptap";
+import type { CommandMenuItemType } from "@/types";
+import { prepareBlockCommandFromList } from "@/utils";
 import CommandsView from "./CommandsView.vue";
-import tippy from "tippy.js";
 
-export default Extension.create({
+export const ExtensionCommandsMenu = Extension.create({
   name: "commands-menu",
+  // Suggestion popovers must get the first chance to handle navigation keys.
+  // Structural editor plugins should only run when the menu is inactive.
+  priority: 1000,
 
   addProseMirrorPlugins() {
-    const commandMenuItems = getToolbarItemsFromExtensions(
-      this.editor as Editor
-    );
+    const commandMenuItems = getToolbarItemsFromExtensions(this.editor);
+
+    const suggestionPlugin: SuggestionOptions = {
+      editor: this.editor,
+      command: ({
+        editor,
+        range,
+        props,
+      }: {
+        editor: Editor;
+        range: Range;
+        props: CommandMenuItemType;
+      }) => {
+        props.command({
+          editor,
+          range: prepareBlockCommandFromList(editor, range),
+        });
+      },
+      items: ({ query }: { query: string }) => {
+        const normalizedQuery = query.trim().toLocaleLowerCase();
+        return commandMenuItems.filter((item) => {
+          return [...item.keywords, item.title, i18n.global.t(item.title)].some(
+            (keyword) => keyword.toLocaleLowerCase().includes(normalizedQuery)
+          );
+        });
+      },
+      render: () => {
+        let component: VueRenderer | null = null;
+        return {
+          onStart: (props) => {
+            component = new VueRenderer(CommandsView, {
+              props,
+              editor: props.editor,
+            });
+            if (!props.clientRect) {
+              return;
+            }
+            if (!component.element) {
+              return;
+            }
+            if (!(component.element instanceof HTMLElement)) {
+              return;
+            }
+            component.element.style.position = "absolute";
+
+            document.body.appendChild(component.element);
+
+            updatePosition(props.editor, component.element);
+          },
+
+          onUpdate(props) {
+            if (!component) {
+              return;
+            }
+            if (!component.element) {
+              return;
+            }
+            if (!(component.element instanceof HTMLElement)) {
+              return;
+            }
+            component.updateProps(props);
+
+            if (!props.clientRect) {
+              return;
+            }
+
+            updatePosition(props.editor, component.element);
+          },
+
+          onKeyDown(props) {
+            if (!component) {
+              return false;
+            }
+            if (props.event.key === "Escape") {
+              if (!component.element) {
+                return false;
+              }
+              component.destroy();
+              component.element.remove();
+              return true;
+            }
+
+            return component.ref?.onKeyDown(props);
+          },
+
+          onExit() {
+            if (!component) {
+              return;
+            }
+            if (!component.element) {
+              return;
+            }
+            component.destroy();
+            component.element.remove();
+          },
+        };
+      },
+    };
 
     return [
       Suggestion({
-        editor: this.editor,
+        pluginKey: new PluginKey("commands-menu-english"),
         char: "/",
-        // @ts-ignore
-        command: ({
-          editor,
-          range,
-          props,
-        }: {
-          editor: Editor;
-          range: Range;
-          props: CommandMenuItem;
-        }) => {
-          props.command({ editor, range });
-        },
-        items: ({ query }: { query: string }) => {
-          return commandMenuItems.filter((item) =>
-            [...item.keywords, item.title].some((keyword) =>
-              keyword.includes(query)
-            )
-          );
-        },
-        render: () => {
-          let component: VueRenderer;
-          let popup: Instance[];
-
-          return {
-            onStart: (props: Record<string, any>) => {
-              component = new VueRenderer(CommandsView, {
-                props,
-                editor: props.editor,
-              });
-
-              if (!props.clientRect) {
-                return;
-              }
-
-              popup = tippy("body", {
-                getReferenceClientRect: props.clientRect,
-                appendTo: () => document.body,
-                content: component.element,
-                showOnCreate: true,
-                interactive: true,
-                trigger: "manual",
-                placement: "bottom-start",
-              });
-            },
-
-            onUpdate(props: Record<string, any>) {
-              component.updateProps(props);
-
-              if (!props.clientRect) {
-                return;
-              }
-
-              popup[0].setProps({
-                getReferenceClientRect: props.clientRect,
-              });
-            },
-
-            onKeyDown(props: Record<string, any>) {
-              if (props.event.key === "Escape") {
-                popup[0].hide();
-
-                return true;
-              }
-
-              return component.ref?.onKeyDown(props);
-            },
-
-            onExit() {
-              popup[0].destroy();
-              component.destroy();
-            },
-          };
-        },
+        ...suggestionPlugin,
+      }),
+      Suggestion({
+        pluginKey: new PluginKey("commands-menu-chinese"),
+        char: "、",
+        ...suggestionPlugin,
       }),
     ];
   },
 });
 
-function getToolbarItemsFromExtensions(editor: Editor) {
+const updatePosition = (editor: Editor, element: HTMLElement) => {
+  const virtualElement = {
+    getBoundingClientRect: () =>
+      posToDOMRect(
+        editor.view,
+        editor.state.selection.from,
+        editor.state.selection.to
+      ),
+  };
+
+  computePosition(virtualElement, element, {
+    placement: "bottom-start",
+    strategy: "absolute",
+    middleware: [shift(), flip()],
+  }).then(({ x, y, strategy }) => {
+    element.style.position = strategy;
+    element.style.left = `${x}px`;
+    element.style.top = `${y}px`;
+    element.style.zIndex = "1000";
+  });
+};
+
+const getToolbarItemsFromExtensions = (editor: Editor) => {
   const extensionManager = editor?.extensionManager;
   return extensionManager.extensions
-    .reduce((acc: CommandMenuItem[], extension: AnyExtension) => {
+    .reduce((acc: CommandMenuItemType[], extension: AnyExtension) => {
       const { getCommandMenuItems } = extension.options;
 
       if (!getCommandMenuItems) {
@@ -120,4 +176,4 @@ function getToolbarItemsFromExtensions(editor: Editor) {
       return [...acc, items];
     }, [])
     .sort((a, b) => a.priority - b.priority);
-}
+};

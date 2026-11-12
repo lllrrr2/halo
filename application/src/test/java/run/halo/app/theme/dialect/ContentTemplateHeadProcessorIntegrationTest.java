@@ -2,21 +2,19 @@ package run.halo.app.theme.dialect;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.thymeleaf.IEngineConfiguration;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
@@ -25,16 +23,19 @@ import org.thymeleaf.spring6.expression.ThymeleafEvaluationContext;
 import org.thymeleaf.templateresolver.StringTemplateResolver;
 import org.thymeleaf.templateresource.ITemplateResource;
 import org.thymeleaf.templateresource.StringTemplateResource;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.content.Post;
+import run.halo.app.core.extension.content.SinglePage;
 import run.halo.app.extension.Metadata;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
-import run.halo.app.plugin.ExtensionComponentsFinder;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 import run.halo.app.theme.DefaultTemplateEnum;
 import run.halo.app.theme.finders.PostFinder;
 import run.halo.app.theme.finders.SinglePageFinder;
 import run.halo.app.theme.finders.vo.PostVo;
+import run.halo.app.theme.finders.vo.SinglePageVo;
 import run.halo.app.theme.router.ModelConst;
 
 /**
@@ -61,10 +62,10 @@ class ContentTemplateHeadProcessorIntegrationTest {
     private SinglePageFinder singlePageFinder;
 
     @Mock
-    private SystemConfigurableEnvironmentFetcher fetcher;
+    private SystemConfigFetcher fetcher;
 
     @Mock
-    private ExtensionComponentsFinder extensionComponentsFinder;
+    ExtensionGetter extensionGetter;
 
     private TemplateEngine templateEngine;
 
@@ -76,44 +77,47 @@ class ContentTemplateHeadProcessorIntegrationTest {
         templateEngine.addTemplateResolver(new TestTemplateResolver());
 
         Map<String, TemplateHeadProcessor> map = new HashMap<>();
-        map.put("postTemplateHeadProcessor",
-            new ContentTemplateHeadProcessor(postFinder, singlePageFinder));
+        map.put("postTemplateHeadProcessor", new ContentTemplateHeadProcessor(postFinder, singlePageFinder));
         map.put("templateGlobalHeadProcessor", new TemplateGlobalHeadProcessor(fetcher));
         map.put("seoProcessor", new GlobalSeoProcessor(fetcher));
         map.put("duplicateMetaTagProcessor", new DuplicateMetaTagProcessor());
-        lenient().when(applicationContext.getBeansOfType(eq(TemplateHeadProcessor.class)))
-            .thenReturn(map);
+        lenient()
+                .when(applicationContext.getBeansOfType(eq(TemplateHeadProcessor.class)))
+                .thenReturn(map);
 
         SystemSetting.Seo seo = new SystemSetting.Seo();
         seo.setKeywords("global keywords");
         seo.setDescription("global description");
-        lenient().when(fetcher.fetch(eq(SystemSetting.Seo.GROUP), eq(SystemSetting.Seo.class)))
-            .thenReturn(Mono.just(seo));
+        lenient()
+                .when(fetcher.fetch(eq(SystemSetting.Seo.GROUP), eq(SystemSetting.Seo.class)))
+                .thenReturn(Mono.just(seo));
 
         SystemSetting.CodeInjection codeInjection = new SystemSetting.CodeInjection();
-        codeInjection.setGlobalHead(
-            "<meta name=\"description\" content=\"global-head-description\"/>");
-        codeInjection.setContentHead(
-            "<meta name=\"description\" content=\"content-head-description\"/>");
-        lenient().when(fetcher.fetch(eq(SystemSetting.CodeInjection.GROUP),
-            eq(SystemSetting.CodeInjection.class))).thenReturn(Mono.just(codeInjection));
+        codeInjection.setGlobalHead("<meta name=\"description\" content=\"global-head-description\"/>");
+        codeInjection.setContentHead("<meta name=\"description\" content=\"content-head-description\"/>");
+        lenient()
+                .when(fetcher.fetch(eq(SystemSetting.CodeInjection.GROUP), eq(SystemSetting.CodeInjection.class)))
+                .thenReturn(Mono.just(codeInjection));
 
-        lenient().when(applicationContext.getBean(eq(SystemConfigurableEnvironmentFetcher.class)))
-            .thenReturn(fetcher);
-        lenient().when(fetcher.fetch(eq(SystemSetting.Seo.GROUP), eq(SystemSetting.Seo.class)))
-            .thenReturn(Mono.empty());
+        lenient()
+                .when(fetcher.fetch(eq(SystemSetting.Seo.GROUP), eq(SystemSetting.Seo.class)))
+                .thenReturn(Mono.empty());
 
-        lenient().when(applicationContext.getBean(eq(ExtensionComponentsFinder.class)))
-            .thenReturn(extensionComponentsFinder);
-
-        lenient().when(extensionComponentsFinder.getExtensions(eq(TemplateHeadProcessor.class)))
-            .thenReturn(new ArrayList<>(map.values()));
-
-        lenient().when(applicationContext.getBean(eq(SystemConfigurableEnvironmentFetcher.class)))
-            .thenReturn(fetcher);
+        lenient()
+                .when(applicationContext.getBeanProvider(ExtensionGetter.class))
+                .thenAnswer(invocation -> {
+                    var objectProvider = mock(ObjectProvider.class);
+                    when(objectProvider.getIfUnique()).thenReturn(extensionGetter);
+                    return objectProvider;
+                });
+        lenient()
+                .when(extensionGetter.getExtensions(TemplateHeadProcessor.class))
+                .thenReturn(Flux.fromIterable(map.values()).sort(AnnotationAwareOrderComparator.INSTANCE));
+        lenient()
+                .when(applicationContext.getBean(eq(SystemConfigFetcher.class)))
+                .thenReturn(fetcher);
         lenient().when(fetcher.fetchComment()).thenReturn(Mono.just(new SystemSetting.Comment()));
     }
-
 
     @Test
     void overrideGlobalMetaTest() {
@@ -135,12 +139,14 @@ class ContentTemplateHeadProcessorIntegrationTest {
 
         String result = templateEngine.process("post", context);
         /*
-          this test case shows:
-            1. global seo meta keywords and description is overridden by content head meta
-            2. global head meta is overridden by content head meta
-            3. but global head meta is not overridden by global seo meta
-         */
-        assertThat(Jsoup.parse(result).html()).isEqualTo("""
+         this test case shows:
+           1. global seo meta keywords and description is overridden by content head meta
+           2. global head meta is overridden by content head meta
+           3. but global head meta is not overridden by global seo meta
+        */
+        var outputSettings = new Document.OutputSettings().prettyPrint(true);
+        var actual = Jsoup.parse(result).outputSettings(outputSettings).html();
+        var expected = Jsoup.parse("""
             <!doctype html>
             <html lang="en">
              <head>
@@ -150,10 +156,200 @@ class ContentTemplateHeadProcessorIntegrationTest {
               <meta name="description" content="post-description">
               <meta name="other" content="post-other-meta">
              </head>
-             <body>
-              this is body
-             </body>
-            </html>""");
+             <body>this is body</body>
+            </html>""").outputSettings(outputSettings).html();
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    void shouldDropHtmlMetaWithInvalidAttributeName() {
+        Context context = getContext();
+        context.setVariable("name", "fake-post");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.POST.getValue());
+
+        List<Map<String, String>> htmlMetas = new ArrayList<>();
+        Map<String, String> maliciousMeta = new HashMap<>();
+        maliciousMeta.put("x\"><script>alert(1)</script><meta name=\"", "injected");
+        htmlMetas.add(maliciousMeta);
+        htmlMetas.add(mutableMetaMap("keywords", "postK1"));
+        Post.PostSpec postSpec = new Post.PostSpec();
+        postSpec.setHtmlMetas(htmlMetas);
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-post");
+        PostVo postVo = PostVo.builder().spec(postSpec).metadata(metadata).build();
+        when(postFinder.getByName(eq("fake-post"))).thenReturn(Mono.just(postVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("script")).isEmpty();
+        assertThat(result).doesNotContain("alert(1)");
+        assertThat(document.select("meta[name=keywords]")).singleElement();
+    }
+
+    @Test
+    void shouldEscapeHtmlMetaAttributeValues() {
+        Context context = getContext();
+        context.setVariable("name", "fake-post");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.POST.getValue());
+
+        List<Map<String, String>> htmlMetas = new ArrayList<>();
+        htmlMetas.add(mutableMetaMap("description", "\"><script>alert(1)</script>"));
+        htmlMetas.add(mutableMetaMap("keywords", "a & b"));
+        Post.PostSpec postSpec = new Post.PostSpec();
+        postSpec.setHtmlMetas(htmlMetas);
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-post");
+        PostVo postVo = PostVo.builder().spec(postSpec).metadata(metadata).build();
+        when(postFinder.getByName(eq("fake-post"))).thenReturn(Mono.just(postVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("script")).isEmpty();
+        assertThat(document.select("meta[name=description]"))
+                .singleElement()
+                .satisfies(meta -> assertThat(meta.attr("content")).isEqualTo("\"><script>alert(1)</script>"));
+        assertThat(document.select("meta[name=keywords]"))
+                .singleElement()
+                .satisfies(meta -> assertThat(meta.attr("content")).isEqualTo("a & b"));
+        assertThat(result).contains("content=\"&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;\"");
+        assertThat(result).contains("content=\"a &amp; b\"");
+    }
+
+    @Test
+    void shouldEscapeExcerptInDescriptionMeta() {
+        Context context = getContext();
+        context.setVariable("name", "fake-post");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.POST.getValue());
+
+        Post.PostStatus status = new Post.PostStatus();
+        status.setExcerpt("\"><script>alert(1)</script>");
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-post");
+        PostVo postVo = PostVo.builder()
+                .spec(new Post.PostSpec())
+                .status(status)
+                .metadata(metadata)
+                .build();
+        when(postFinder.getByName(eq("fake-post"))).thenReturn(Mono.just(postVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("script")).isEmpty();
+        assertThat(document.select("meta[name=description]"))
+                .singleElement()
+                .satisfies(meta -> assertThat(meta.attr("content")).isEqualTo("\"><script>alert(1)</script>"));
+    }
+
+    @Test
+    void shouldEscapeHtmlMetaAttributeValuesForSinglePage() {
+        Context context = getContext();
+        context.setVariable("name", "fake-page");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.SINGLE_PAGE.getValue());
+
+        List<Map<String, String>> htmlMetas = new ArrayList<>();
+        htmlMetas.add(mutableMetaMap("description", "\"><script>alert(1)</script>"));
+        SinglePage.SinglePageSpec spec = new SinglePage.SinglePageSpec();
+        spec.setHtmlMetas(htmlMetas);
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-page");
+        SinglePageVo pageVo =
+                SinglePageVo.builder().spec(spec).metadata(metadata).build();
+        when(singlePageFinder.getByName(eq("fake-page"))).thenReturn(Mono.just(pageVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("script")).isEmpty();
+        assertThat(document.select("meta[name=description]"))
+                .singleElement()
+                .satisfies(meta -> assertThat(meta.attr("content")).isEqualTo("\"><script>alert(1)</script>"));
+    }
+
+    @Test
+    void shouldKeepValidHtmlMetaAttributeNames() {
+        Context context = getContext();
+        context.setVariable("name", "fake-post");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.POST.getValue());
+
+        List<Map<String, String>> htmlMetas = new ArrayList<>();
+        Map<String, String> meta = new LinkedHashMap<>();
+        meta.put("property", "og:title");
+        meta.put("content", "Hello");
+        meta.put("data-test", "value");
+        meta.put("media", "(prefers-color-scheme: dark)");
+        htmlMetas.add(meta);
+        Post.PostSpec postSpec = new Post.PostSpec();
+        postSpec.setHtmlMetas(htmlMetas);
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-post");
+        PostVo postVo = PostVo.builder().spec(postSpec).metadata(metadata).build();
+        when(postFinder.getByName(eq("fake-post"))).thenReturn(Mono.just(postVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("meta[property=og:title]")).singleElement().satisfies(ogMeta -> {
+            assertThat(ogMeta.attr("content")).isEqualTo("Hello");
+            assertThat(ogMeta.attr("data-test")).isEqualTo("value");
+            assertThat(ogMeta.attr("media")).isEqualTo("(prefers-color-scheme: dark)");
+        });
+    }
+
+    @Test
+    void shouldIgnoreNullMetaAndNullAttributeValue() {
+        Context context = getContext();
+        context.setVariable("name", "fake-post");
+        context.setVariable(ModelConst.TEMPLATE_ID, DefaultTemplateEnum.POST.getValue());
+
+        List<Map<String, String>> htmlMetas = new ArrayList<>();
+        htmlMetas.add(null);
+        Map<String, String> metaWithNullValue = new HashMap<>();
+        metaWithNullValue.put("name", "robots");
+        metaWithNullValue.put("content", null);
+        htmlMetas.add(metaWithNullValue);
+        Post.PostSpec postSpec = new Post.PostSpec();
+        postSpec.setHtmlMetas(htmlMetas);
+        Metadata metadata = new Metadata();
+        metadata.setName("fake-post");
+        PostVo postVo = PostVo.builder().spec(postSpec).metadata(metadata).build();
+        when(postFinder.getByName(eq("fake-post"))).thenReturn(Mono.just(postVo));
+
+        String result = templateEngine.process("post", context);
+
+        var document = Jsoup.parse(result);
+        assertThat(document.select("script")).isEmpty();
+        assertThat(document.select("meta[name=robots]"))
+                .singleElement()
+                .satisfies(meta -> assertThat(meta.attr("content")).isEmpty());
+    }
+
+    @Test
+    void shouldKeepThemeColorMetasWithDifferentMedia() {
+        SystemSetting.CodeInjection codeInjection = new SystemSetting.CodeInjection();
+        codeInjection.setGlobalHead(null);
+        codeInjection.setContentHead(null);
+        when(fetcher.fetch(eq(SystemSetting.CodeInjection.GROUP), eq(SystemSetting.CodeInjection.class)))
+                .thenReturn(Mono.just(codeInjection));
+
+        String result = templateEngine.process("themeColor", getContext());
+
+        var actual = Jsoup.parse(result);
+        var themeColorMetas = actual.select("meta[name=theme-color]");
+        assertThat(themeColorMetas).hasSize(2);
+        assertThat(themeColorMetas.get(0).attr("content")).isEqualTo("cyan");
+        assertThat(themeColorMetas.get(0).attr("media")).isEqualTo("(prefers-color-scheme: light)");
+        assertThat(themeColorMetas.get(1).attr("content")).isEqualTo("black");
+        assertThat(themeColorMetas.get(1).attr("media")).isEqualTo("(prefers-color-scheme: dark)");
+        assertThat(actual.select("meta[name=robots]")).hasSize(2);
+        assertThat(actual.select("meta[name=custom-meta]")).singleElement().satisfies(meta -> {
+            assertThat(meta.attr("content")).isEqualTo("new custom");
+        });
+        assertThat(actual.select("meta[name=description]")).singleElement().satisfies(meta -> {
+            assertThat(meta.attr("content")).isEqualTo("new description");
+        });
     }
 
     Map<String, String> mutableMetaMap(String nameValue, String contentValue) {
@@ -166,18 +362,23 @@ class ContentTemplateHeadProcessorIntegrationTest {
     private Context getContext() {
         Context context = new Context();
         context.setVariable(
-            ThymeleafEvaluationContext.THYMELEAF_EVALUATION_CONTEXT_CONTEXT_VARIABLE_NAME,
-            new ThymeleafEvaluationContext(applicationContext, null));
+                ThymeleafEvaluationContext.THYMELEAF_EVALUATION_CONTEXT_CONTEXT_VARIABLE_NAME,
+                new ThymeleafEvaluationContext(applicationContext, null));
         return context;
     }
 
     static class TestTemplateResolver extends StringTemplateResolver {
         @Override
-        protected ITemplateResource computeTemplateResource(IEngineConfiguration configuration,
-            String ownerTemplate, String template,
-            Map<String, Object> templateResolutionAttributes) {
+        protected ITemplateResource computeTemplateResource(
+                IEngineConfiguration configuration,
+                String ownerTemplate,
+                String template,
+                Map<String, Object> templateResolutionAttributes) {
             if (template.equals("post")) {
                 return new StringTemplateResource(postTemplate());
+            }
+            if (template.equals("themeColor")) {
+                return new StringTemplateResource(themeColorTemplate());
             }
             return null;
         }
@@ -189,6 +390,30 @@ class ContentTemplateHeadProcessorIntegrationTest {
                   <head>
                     <meta charset="UTF-8" />
                     <title>Post detail</title>
+                  </head>
+                  <body>
+                    this is body
+                  </body>
+                </html>
+                """;
+        }
+
+        private String themeColorTemplate() {
+            return """
+                <!DOCTYPE html>
+                <html lang="en" xmlns:th="http://www.thymeleaf.org">
+                  <head>
+                    <meta charset="UTF-8" />
+                    <title>Theme color</title>
+                    <meta name="theme-color" th:if="true" content="cyan" media="(prefers-color-scheme: light)">
+                    <meta name="theme-color" th:if="true" content="black" media="(prefers-color-scheme: dark)">
+                    <meta name="theme-color" th:if="false" content="blue" media="(prefers-color-scheme: dark)">
+                    <meta name="robots" content="noindex">
+                    <meta name="robots" content="nofollow">
+                    <meta name="custom-meta" content="old custom">
+                    <meta name="custom-meta" content="new custom">
+                    <meta name="description" content="old description">
+                    <meta name="description" content="new description">
                   </head>
                   <body>
                     this is body

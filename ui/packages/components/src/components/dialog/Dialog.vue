@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { VModal } from "../modal";
-import { VButton } from "../button";
+import { markRaw, ref, type Component, type Raw } from "vue";
+import type { DialogProps, DialogType } from "@/components/dialog/types";
 import {
   IconCheckboxCircle,
   IconClose,
@@ -8,47 +8,32 @@ import {
   IconForbidLine,
   IconInformation,
 } from "../../icons/icons";
-import { ref, type Component, markRaw, type Raw } from "vue";
-import type { Type } from "@/components/dialog/interface";
-import type { Type as ButtonType } from "@/components/button/interface";
+import { VButton } from "../button";
+import { VModal } from "../modal";
 
-const props = withDefaults(
-  defineProps<{
-    type?: Type;
-    title?: string;
-    description?: string;
-    confirmText?: string;
-    confirmType?: ButtonType;
-    showCancel?: boolean;
-    cancelText?: string;
-    visible?: boolean;
-    onConfirm?: () => void;
-    onCancel?: () => void;
-  }>(),
-  {
-    type: "info",
-    title: "提示",
-    description: "",
-    confirmText: "确定",
-    confirmType: "primary",
-    showCancel: true,
-    cancelText: "取消",
-    visible: false,
-    onConfirm: () => {
-      return;
-    },
-    onCancel: () => {
-      return;
-    },
-  }
-);
+const props = withDefaults(defineProps<DialogProps>(), {
+  type: "info",
+  title: "提示",
+  description: "",
+  confirmText: "确定",
+  confirmType: "primary",
+  showCancel: true,
+  cancelText: "取消",
+  visible: false,
+  onConfirm: () => {
+    return;
+  },
+  onCancel: () => {
+    return;
+  },
+});
 
 const emit = defineEmits<{
   (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const icons: Record<Type, { icon: Raw<Component>; color: string }> = {
+const icons: Record<DialogType, { icon: Raw<Component>; color: string }> = {
   success: {
     icon: markRaw(IconCheckboxCircle),
     color: "green",
@@ -101,29 +86,30 @@ const handleClose = () => {
   <VModal
     :visible="visible"
     :width="450"
-    :layer-closable="true"
+    :layer-closable="false"
+    :data-unique-id="uniqueId"
     @close="handleCancel()"
   >
-    <div class="flex justify-between items-start py-2 mb-2">
+    <div class="mb-2 flex items-start justify-between py-2">
       <div class="flex flex-row items-center gap-3">
         <component
           :is="icons[type].icon"
           :class="`text-${icons[type].color}-500`"
-          class="w-6 h-6"
+          class="h-6 w-6 flex-none"
         ></component>
-        <div class="text-base text-gray-900 font-bold">{{ title }}</div>
+        <div class="text-base font-bold text-gray-900">{{ title }}</div>
       </div>
       <div>
         <IconClose class="cursor-pointer" @click="handleCancel" />
       </div>
     </div>
     <div class="flex items-center gap-4">
-      <div class="flex-1 flex items-stretch">
-        <div class="text-sm text-gray-700 break-all">{{ description }}</div>
+      <div class="flex flex-1 items-stretch">
+        <div class="break-all text-sm text-gray-700">{{ description }}</div>
       </div>
     </div>
     <template #footer>
-      <div class="flex flex-col sm:flex-row gap-[10px]">
+      <div class="flex flex-row flex-wrap gap-3">
         <VButton :loading="loading" :type="confirmType" @click="handleConfirm">
           {{ confirmText }}
         </VButton>

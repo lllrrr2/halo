@@ -1,23 +1,21 @@
 package run.halo.app.content.comment;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.assertArg;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.app.content.NotificationReasonConst;
 import run.halo.app.core.extension.User;
@@ -27,16 +25,18 @@ import run.halo.app.core.extension.content.Reply;
 import run.halo.app.core.extension.content.SinglePage;
 import run.halo.app.core.extension.notification.Reason;
 import run.halo.app.event.post.CommentCreatedEvent;
+import run.halo.app.event.post.ReplyApprovedEvent;
 import run.halo.app.event.post.ReplyCreatedEvent;
 import run.halo.app.extension.ExtensionClient;
 import run.halo.app.extension.GroupVersionKind;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.Ref;
 import run.halo.app.infra.ExternalLinkProcessor;
+import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.notification.NotificationReasonEmitter;
 import run.halo.app.notification.ReasonPayload;
 import run.halo.app.notification.UserIdentity;
-import run.halo.app.plugin.ExtensionComponentsFinder;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 /**
  * Tests for {@link CommentNotificationReasonPublisher}.
@@ -51,19 +51,16 @@ class CommentNotificationReasonPublisherTest {
     private ExtensionClient client;
 
     @Mock
-    CommentNotificationReasonPublisher.NewCommentOnPostReasonPublisher
-        newCommentOnPostReasonPublisher;
+    CommentNotificationReasonPublisher.NewCommentOnPostReasonPublisher newCommentOnPostReasonPublisher;
 
     @Mock
-    CommentNotificationReasonPublisher.NewCommentOnPageReasonPublisher
-        newCommentOnPageReasonPublisher;
+    CommentNotificationReasonPublisher.NewCommentOnPageReasonPublisher newCommentOnPageReasonPublisher;
 
     @Mock
     CommentNotificationReasonPublisher.NewReplyReasonPublisher newReplyReasonPublisher;
 
     @InjectMocks
     private CommentNotificationReasonPublisher reasonPublisher;
-
 
     @Test
     void onNewCommentTest() {
@@ -90,12 +87,12 @@ class CommentNotificationReasonPublisherTest {
         var spec = mock(Reply.ReplySpec.class);
         when(reply.getSpec()).thenReturn(spec);
         when(spec.getCommentName()).thenReturn("fake-comment");
+        when(spec.getApproved()).thenReturn(true);
 
         var spyReasonPublisher = spy(reasonPublisher);
         var comment = mock(Comment.class);
 
-        when(client.fetch(eq(Comment.class), eq("fake-comment")))
-            .thenReturn(Optional.of(comment));
+        when(client.fetch(eq(Comment.class), eq("fake-comment"))).thenReturn(Optional.of(comment));
 
         var event = new ReplyCreatedEvent(this, reply);
         spyReasonPublisher.onNewReply(event);
@@ -106,15 +103,87 @@ class CommentNotificationReasonPublisherTest {
     }
 
     @Test
+    void shouldNotPublishReasonForUnapprovedReply() {
+        var reply = mock(Reply.class);
+        var spec = mock(Reply.ReplySpec.class);
+        when(reply.getSpec()).thenReturn(spec);
+        when(spec.getApproved()).thenReturn(false);
+
+        reasonPublisher.onNewReply(new ReplyCreatedEvent(this, reply));
+
+        verify(newReplyReasonPublisher, never()).publishReasonBy(any(), any());
+        verify(client, never()).fetch(eq(Comment.class), anyString());
+    }
+
+    @Test
+    void shouldPublishReasonWhenReplyApproved() {
+        var reply = createReplyForApproval(true);
+
+        var comment = mock(Comment.class);
+        when(client.fetch(eq(Reply.class), eq("fake-reply"))).thenReturn(Optional.of(reply));
+        when(client.fetch(eq(Comment.class), eq("fake-comment"))).thenReturn(Optional.of(comment));
+
+        reasonPublisher.onReplyApproved(new ReplyApprovedEvent(this, reply));
+
+        verify(newReplyReasonPublisher).publishReasonBy(eq(reply), eq(comment));
+    }
+
+    @Test
+    void shouldNotPublishReasonWhenReplyWasUnapprovedAgain() {
+        var eventReply = createReplyForApproval(true);
+        var currentReply = createReplyForApproval(false);
+        when(client.fetch(eq(Reply.class), eq("fake-reply"))).thenReturn(Optional.of(currentReply));
+
+        reasonPublisher.onReplyApproved(new ReplyApprovedEvent(this, eventReply));
+
+        verify(newReplyReasonPublisher, never()).publishReasonBy(any(), any());
+        verify(client, never()).fetch(eq(Comment.class), anyString());
+    }
+
+    @Test
+    void shouldNotPublishReasonWhenApprovedReplyWasDeleted() {
+        var eventReply = createReplyForApproval(true);
+        var currentReply = createReplyForApproval(true);
+        currentReply.getMetadata().setDeletionTimestamp(Instant.now());
+        when(client.fetch(eq(Reply.class), eq("fake-reply"))).thenReturn(Optional.of(currentReply));
+
+        reasonPublisher.onReplyApproved(new ReplyApprovedEvent(this, eventReply));
+
+        verify(newReplyReasonPublisher, never()).publishReasonBy(any(), any());
+        verify(client, never()).fetch(eq(Comment.class), anyString());
+    }
+
+    @Test
+    void shouldNotPublishReasonWhenApprovedReplyWasGone() {
+        var eventReply = createReplyForApproval(true);
+        when(client.fetch(eq(Reply.class), eq("fake-reply"))).thenReturn(Optional.empty());
+
+        reasonPublisher.onReplyApproved(new ReplyApprovedEvent(this, eventReply));
+
+        verify(newReplyReasonPublisher, never()).publishReasonBy(any(), any());
+        verify(client, never()).fetch(eq(Comment.class), anyString());
+    }
+
+    private static Reply createReplyForApproval(boolean approved) {
+        var reply = new Reply();
+        var metadata = new Metadata();
+        metadata.setName("fake-reply");
+        reply.setMetadata(metadata);
+        var spec = new Reply.ReplySpec();
+        spec.setCommentName("fake-comment");
+        spec.setApproved(approved);
+        reply.setSpec(spec);
+        return reply;
+    }
+
+    @Test
     void isPostCommentTest() {
         var comment = createComment();
-        comment.getSpec()
-            .setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
+        comment.getSpec().setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
 
         assertThat(reasonPublisher.isPostComment(comment)).isTrue();
 
-        comment.getSpec()
-            .setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(SinglePage.class)));
+        comment.getSpec().setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(SinglePage.class)));
 
         assertThat(reasonPublisher.isPostComment(comment)).isFalse();
     }
@@ -122,19 +191,139 @@ class CommentNotificationReasonPublisherTest {
     @Test
     void isPageComment() {
         var comment = createComment();
-        comment.getSpec()
-            .setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
+        comment.getSpec().setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
 
         assertThat(reasonPublisher.isPageComment(comment)).isFalse();
 
-        comment.getSpec()
-            .setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(SinglePage.class)));
+        comment.getSpec().setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(SinglePage.class)));
 
         assertThat(reasonPublisher.isPageComment(comment)).isTrue();
     }
 
+    @Nested
+    @ExtendWith(MockitoExtension.class)
+    class CommentContentConverterTest {
+        @Mock
+        ExternalUrlSupplier externalUrlSupplier;
+
+        @Mock
+        ExternalLinkProcessor externalLinkProcessor;
+
+        @InjectMocks
+        CommentNotificationReasonPublisher.CommentContentConverter commentContentConverter;
+
+        @Test
+        void shouldConvertRelativeImageLinksToAbsolute() {
+            var content = "<p>Test content <img src=\"/upload/image.jpg\" alt=\"Test image\" /></p>";
+
+            when(externalLinkProcessor.processLink("/upload/image.jpg"))
+                    .thenReturn("https://example.com/upload/image.jpg");
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("https://example.com/upload/image.jpg");
+            assertThat(result).contains("Test content");
+            verify(externalLinkProcessor).processLink("/upload/image.jpg");
+        }
+
+        @Test
+        void shouldHandleRelativeImageLinksWithoutLeadingSlash() {
+            var content = "<p><img src=\"upload/image.jpg\" /></p>";
+
+            when(externalLinkProcessor.processLink("upload/image.jpg"))
+                    .thenReturn("https://example.com/upload/image.jpg");
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("https://example.com/upload/image.jpg");
+            verify(externalLinkProcessor).processLink("upload/image.jpg");
+        }
+
+        @Test
+        void shouldNotConvertAbsoluteImageLinks() {
+            var content = "<p><img src=\"https://cdn.example.com/image.jpg\" /></p>";
+
+            when(externalLinkProcessor.processLink("https://cdn.example.com/image.jpg"))
+                    .thenReturn("https://cdn.example.com/image.jpg");
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("https://cdn.example.com/image.jpg");
+            verify(externalLinkProcessor).processLink("https://cdn.example.com/image.jpg");
+        }
+
+        @Test
+        void shouldHandleMultipleImages() {
+            var content = "<p>"
+                    + "<img src=\"/img1.jpg\" />"
+                    + "<img src=\"/img2.jpg\" />"
+                    + "<img src=\"https://example.com/img3.jpg\" />"
+                    + "</p>";
+
+            when(externalLinkProcessor.processLink("/img1.jpg")).thenReturn("https://example.com/img1.jpg");
+            when(externalLinkProcessor.processLink("/img2.jpg")).thenReturn("https://example.com/img2.jpg");
+            when(externalLinkProcessor.processLink("https://example.com/img3.jpg"))
+                    .thenReturn("https://example.com/img3.jpg");
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("https://example.com/img1.jpg");
+            assertThat(result).contains("https://example.com/img2.jpg");
+            assertThat(result).contains("https://example.com/img3.jpg");
+            verify(externalLinkProcessor).processLink("/img1.jpg");
+            verify(externalLinkProcessor).processLink("/img2.jpg");
+            verify(externalLinkProcessor).processLink("https://example.com/img3.jpg");
+        }
+
+        @Test
+        void shouldHandleContentWithoutImages() {
+            var content = "<p>This is a comment content without images</p>";
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("This is a comment content without images");
+            assertThat(result).doesNotContain("img");
+        }
+
+        @Test
+        void shouldHandleEmptyContent() {
+            var content = "";
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        void shouldHandleComplexHtmlContent() {
+            var content = """
+                <div>
+                    <h1>Title</h1>
+                    <p>Paragraph content</p>
+                    <img src="/images/photo1.png" alt="Photo 1" />
+                    <p>More text</p>
+                    <img src="assets/photo2.jpg" />
+                </div>
+                """;
+
+            when(externalLinkProcessor.processLink("/images/photo1.png"))
+                    .thenReturn("https://example.com/images/photo1.png");
+            when(externalLinkProcessor.processLink("assets/photo2.jpg"))
+                    .thenReturn("https://example.com/assets/photo2.jpg");
+
+            var result = commentContentConverter.convertRelativeLinks(content);
+
+            assertThat(result).contains("https://example.com/images/photo1.png");
+            assertThat(result).contains("https://example.com/assets/photo2.jpg");
+            assertThat(result).contains("Title");
+            assertThat(result).contains("Paragraph content");
+            verify(externalLinkProcessor).processLink("/images/photo1.png");
+            verify(externalLinkProcessor).processLink("assets/photo2.jpg");
+        }
+    }
 
     @Nested
+    @ExtendWith(MockitoExtension.class)
     class NewCommentOnPostReasonPublisherTest {
         @Mock
         ExtensionClient client;
@@ -143,14 +332,16 @@ class CommentNotificationReasonPublisherTest {
         NotificationReasonEmitter emitter;
 
         @Mock
-        ExtensionComponentsFinder extensionComponentsFinder;
+        ExtensionGetter extensionGetter;
 
         @Mock
         ExternalLinkProcessor externalLinkProcessor;
 
+        @Mock
+        CommentNotificationReasonPublisher.CommentContentConverter commentContentConverter;
+
         @InjectMocks
-        CommentNotificationReasonPublisher.NewCommentOnPostReasonPublisher
-            newCommentOnPostReasonPublisher;
+        CommentNotificationReasonPublisher.NewCommentOnPostReasonPublisher newCommentOnPostReasonPublisher;
 
         @Test
         void publishReasonByTest() {
@@ -163,15 +354,19 @@ class CommentNotificationReasonPublisherTest {
             var metadata = new Metadata();
             metadata.setName("fake-post");
             when(post.getMetadata()).thenReturn(metadata);
-            when(post.getStatusOrDefault()).thenReturn(new Post.PostStatus());
+            var status = new Post.PostStatus();
+            status.setPermalink("/archives/post");
+            when(post.getStatusOrDefault()).thenReturn(status);
+            when(externalLinkProcessor.processLink("/archives/post")).thenReturn("https://example.test/archives/post");
             when(post.getSpec()).thenReturn(spec);
             when(spec.getTitle()).thenReturn("fake-title");
 
-            when(client.fetch(eq(Post.class), eq(metadata.getName())))
-                .thenReturn(Optional.of(post));
+            when(client.fetch(eq(Post.class), eq(metadata.getName()))).thenReturn(Optional.of(post));
 
-            when(emitter.emit(eq("new-comment-on-post"), any()))
-                .thenReturn(Mono.empty());
+            when(commentContentConverter.convertRelativeLinks(eq("fake-comment-content")))
+                    .thenReturn("fake-comment-content");
+
+            when(emitter.emit(eq("new-comment-on-post"), any())).thenReturn(Mono.empty());
 
             newCommentOnPostReasonPublisher.publishReasonBy(comment);
 
@@ -181,24 +376,30 @@ class CommentNotificationReasonPublisherTest {
                 consumer.accept(builder);
                 var reasonPayload = builder.build();
                 var reasonSubject = Reason.Subject.builder()
-                    .apiVersion(post.getApiVersion())
-                    .kind(post.getKind())
-                    .name(post.getMetadata().getName())
-                    .title(post.getSpec().getTitle())
-                    .build();
+                        .apiVersion(post.getApiVersion())
+                        .kind(post.getKind())
+                        .name(post.getMetadata().getName())
+                        .title(post.getSpec().getTitle())
+                        .url("https://example.test/archives/post")
+                        .build();
                 assertThat(reasonPayload.getSubject()).isEqualTo(reasonSubject);
 
                 assertThat(reasonPayload.getAuthor())
-                    .isEqualTo(
-                        UserIdentity.anonymousWithEmail(comment.getSpec().getOwner().getName()));
+                        .isEqualTo(UserIdentity.anonymousWithEmail(
+                                comment.getSpec().getOwner().getName()));
 
-                assertThat(reasonPayload.getAttributes()).containsAllEntriesOf(Map.of(
-                    "postName", post.getMetadata().getName(),
-                    "postTitle", post.getSpec().getTitle(),
-                    "commenter", comment.getSpec().getOwner().getDisplayName(),
-                    "content", comment.getSpec().getContent(),
-                    "commentName", comment.getMetadata().getName()
-                ));
+                assertThat(reasonPayload.getAttributes())
+                        .containsEntry(
+                                "commentUrl",
+                                "https://example.test/archives/post#halo-comment="
+                                        + comment.getMetadata().getName())
+                        .containsEntry("postUrl", "https://example.test/archives/post")
+                        .containsAllEntriesOf(Map.of(
+                                "postName", post.getMetadata().getName(),
+                                "postTitle", post.getSpec().getTitle(),
+                                "commenter", comment.getSpec().getOwner().getDisplayName(),
+                                "content", comment.getSpec().getContent(),
+                                "commentName", comment.getMetadata().getName()));
             }));
         }
 
@@ -217,11 +418,13 @@ class CommentNotificationReasonPublisherTest {
             post.getSpec().setOwner("fake-user");
 
             // the username is the same as the comment owner
-            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post)).isTrue();
+            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post))
+                    .isTrue();
 
             // not the same username
             commentOwner.setName("other");
-            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post)).isFalse();
+            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post))
+                    .isFalse();
 
             // the comment owner is email and the same as the post-owner user email
             commentOwner.setKind(Comment.CommentOwner.KIND_EMAIL);
@@ -229,18 +432,20 @@ class CommentNotificationReasonPublisherTest {
             var user = new User();
             user.setSpec(new User.UserSpec());
             user.getSpec().setEmail("example@example.com");
-            when(client.fetch(eq(User.class), eq("fake-user")))
-                .thenReturn(Optional.of(user));
+            when(client.fetch(eq(User.class), eq("fake-user"))).thenReturn(Optional.of(user));
 
-            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post)).isTrue();
+            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post))
+                    .isTrue();
 
             // the comment owner is email and not the same as the post-owner user email
             user.getSpec().setEmail("fake@example.com");
-            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post)).isFalse();
+            assertThat(newCommentOnPostReasonPublisher.doNotEmitReason(comment, post))
+                    .isFalse();
         }
     }
 
     @Nested
+    @ExtendWith(MockitoExtension.class)
     class NewCommentOnPageReasonPublisherTest {
         @Mock
         ExtensionClient client;
@@ -249,37 +454,39 @@ class CommentNotificationReasonPublisherTest {
         NotificationReasonEmitter emitter;
 
         @Mock
-        ExtensionComponentsFinder extensionComponentsFinder;
-
-        @Mock
         ExternalLinkProcessor externalLinkProcessor;
 
+        @Mock
+        CommentNotificationReasonPublisher.CommentContentConverter commentContentConverter;
+
         @InjectMocks
-        CommentNotificationReasonPublisher.NewCommentOnPageReasonPublisher
-            newCommentOnPageReasonPublisher;
+        CommentNotificationReasonPublisher.NewCommentOnPageReasonPublisher newCommentOnPageReasonPublisher;
 
         @Test
         void publishReasonByTest() {
             final var comment = createComment();
             comment.getSpec().getOwner().setDisplayName("fake-display-name");
             comment.getSpec().setContent("fake-comment-content");
-            comment.getSpec().setSubjectRef(
-                Ref.of("fake-page", GroupVersionKind.fromExtension(SinglePage.class)));
+            comment.getSpec().setSubjectRef(Ref.of("fake-page", GroupVersionKind.fromExtension(SinglePage.class)));
 
             var page = mock(SinglePage.class);
             final var spec = mock(SinglePage.SinglePageSpec.class);
             var metadata = new Metadata();
             metadata.setName("fake-page");
             when(page.getMetadata()).thenReturn(metadata);
-            when(page.getStatusOrDefault()).thenReturn(new SinglePage.SinglePageStatus());
+            var status = new SinglePage.SinglePageStatus();
+            status.setPermalink("/page");
+            when(page.getStatusOrDefault()).thenReturn(status);
+            when(externalLinkProcessor.processLink("/page")).thenReturn("https://example.test/page");
             when(page.getSpec()).thenReturn(spec);
             when(spec.getTitle()).thenReturn("fake-title");
 
-            when(client.fetch(eq(SinglePage.class), eq(metadata.getName())))
-                .thenReturn(Optional.of(page));
+            when(client.fetch(eq(SinglePage.class), eq(metadata.getName()))).thenReturn(Optional.of(page));
 
-            when(emitter.emit(eq("new-comment-on-single-page"), any()))
-                .thenReturn(Mono.empty());
+            when(commentContentConverter.convertRelativeLinks(eq("fake-comment-content")))
+                    .thenReturn("fake-comment-content");
+
+            when(emitter.emit(eq("new-comment-on-single-page"), any())).thenReturn(Mono.empty());
 
             newCommentOnPageReasonPublisher.publishReasonBy(comment);
 
@@ -289,24 +496,30 @@ class CommentNotificationReasonPublisherTest {
                 consumer.accept(builder);
                 var reasonPayload = builder.build();
                 var reasonSubject = Reason.Subject.builder()
-                    .apiVersion(page.getApiVersion())
-                    .kind(page.getKind())
-                    .name(page.getMetadata().getName())
-                    .title(page.getSpec().getTitle())
-                    .build();
+                        .apiVersion(page.getApiVersion())
+                        .kind(page.getKind())
+                        .name(page.getMetadata().getName())
+                        .title(page.getSpec().getTitle())
+                        .url("https://example.test/page")
+                        .build();
                 assertThat(reasonPayload.getSubject()).isEqualTo(reasonSubject);
 
                 assertThat(reasonPayload.getAuthor())
-                    .isEqualTo(
-                        UserIdentity.anonymousWithEmail(comment.getSpec().getOwner().getName()));
+                        .isEqualTo(UserIdentity.anonymousWithEmail(
+                                comment.getSpec().getOwner().getName()));
 
-                assertThat(reasonPayload.getAttributes()).containsAllEntriesOf(Map.of(
-                    "pageName", page.getMetadata().getName(),
-                    "pageTitle", page.getSpec().getTitle(),
-                    "commenter", comment.getSpec().getOwner().getDisplayName(),
-                    "content", comment.getSpec().getContent(),
-                    "commentName", comment.getMetadata().getName()
-                ));
+                assertThat(reasonPayload.getAttributes())
+                        .containsEntry(
+                                "commentUrl",
+                                "https://example.test/page#halo-comment="
+                                        + comment.getMetadata().getName())
+                        .containsEntry("pageUrl", "https://example.test/page")
+                        .containsAllEntriesOf(Map.of(
+                                "pageName", page.getMetadata().getName(),
+                                "pageTitle", page.getSpec().getTitle(),
+                                "commenter", comment.getSpec().getOwner().getDisplayName(),
+                                "content", comment.getSpec().getContent(),
+                                "commentName", comment.getMetadata().getName()));
             }));
         }
 
@@ -325,11 +538,13 @@ class CommentNotificationReasonPublisherTest {
             page.getSpec().setOwner("fake-user");
 
             // the username is the same as the comment owner
-            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page)).isTrue();
+            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page))
+                    .isTrue();
 
             // not the same username
             commentOwner.setName("other");
-            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page)).isFalse();
+            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page))
+                    .isFalse();
 
             // the comment owner is email and the same as the page-owner user email
             commentOwner.setKind(Comment.CommentOwner.KIND_EMAIL);
@@ -337,19 +552,24 @@ class CommentNotificationReasonPublisherTest {
             var user = new User();
             user.setSpec(new User.UserSpec());
             user.getSpec().setEmail("example@example.com");
-            when(client.fetch(eq(User.class), eq("fake-user")))
-                .thenReturn(Optional.of(user));
+            when(client.fetch(eq(User.class), eq("fake-user"))).thenReturn(Optional.of(user));
 
-            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page)).isTrue();
+            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page))
+                    .isTrue();
 
             // the comment owner is email and not the same as the post-owner user email
             user.getSpec().setEmail("fake@example.com");
-            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page)).isFalse();
+            assertThat(newCommentOnPageReasonPublisher.doNotEmitReason(comment, page))
+                    .isFalse();
         }
     }
 
     @Nested
+    @ExtendWith(MockitoExtension.class)
     class NewReplyReasonPublisherTest {
+
+        @Mock
+        ExternalLinkProcessor externalLinkProcessor;
 
         @Mock
         ExtensionClient client;
@@ -358,61 +578,191 @@ class CommentNotificationReasonPublisherTest {
         NotificationReasonEmitter notificationReasonEmitter;
 
         @Mock
-        ExtensionComponentsFinder extensionComponentsFinder;
+        ExtensionGetter extensionGetter;
+
+        @Mock
+        CommentNotificationReasonPublisher.CommentContentConverter commentContentConverter;
 
         @InjectMocks
         CommentNotificationReasonPublisher.NewReplyReasonPublisher newReplyReasonPublisher;
 
         @Test
         void publishReasonByTest() {
+            var subject = mock(PostCommentSubject.class);
+            when(extensionGetter.getExtensions(CommentSubject.class)).thenReturn(Flux.just(subject));
+            when(subject.supports(any())).thenReturn(true);
+            when(subject.getSubjectDisplay(any()))
+                    .thenReturn(Mono.just(new CommentSubject.SubjectDisplay("Post", "/post", "Post")));
+            when(externalLinkProcessor.processLink("/post")).thenReturn("https://example.test/post");
             var reply = createReply("fake-reply");
+            reply.getSpec().setApproved(true);
 
             reply.getSpec().setQuoteReply("fake-quote-reply");
             var quoteReply = createReply("fake-quote-reply");
 
-            when(client.fetch(eq(Reply.class), eq("fake-quote-reply")))
-                .thenReturn(Optional.of(quoteReply));
+            when(client.fetch(eq(Reply.class), eq("fake-quote-reply"))).thenReturn(Optional.of(quoteReply));
 
             var spyNewReplyReasonPublisher = spy(newReplyReasonPublisher);
 
             var comment = createComment();
             comment.getSpec().setContent("fake-comment-content");
+            comment.getSpec().setApproved(true);
 
-            doReturn(false).when(spyNewReplyReasonPublisher)
-                .doNotEmitReason(any(), any(), any());
-            when(notificationReasonEmitter.emit(any(), any()))
-                .thenReturn(Mono.empty());
+            doReturn(false).when(spyNewReplyReasonPublisher).doNotEmitReason(any(), any(), any());
+
+            // Mock commentContentConverter for all content conversions
+            when(commentContentConverter.convertRelativeLinks(eq("fake-comment-content")))
+                    .thenReturn("fake-comment-content");
+            when(commentContentConverter.convertRelativeLinks(eq("fake-reply-content")))
+                    .thenReturn("fake-reply-content");
+
+            when(notificationReasonEmitter.emit(any(), any())).thenReturn(Mono.empty());
 
             // execute target method
             spyNewReplyReasonPublisher.publishReasonBy(reply, comment);
 
             verify(notificationReasonEmitter)
-                .emit(eq(NotificationReasonConst.SOMEONE_REPLIED_TO_YOU), assertArg(consumer -> {
-                    var builder = ReasonPayload.builder();
-                    consumer.accept(builder);
-                    var reasonPayload = builder.build();
-                    var reasonSubject = Reason.Subject.builder()
-                        .apiVersion(quoteReply.getApiVersion())
-                        .kind(quoteReply.getKind())
-                        .name(quoteReply.getMetadata().getName())
-                        .title(quoteReply.getSpec().getContent())
-                        .build();
-                    assertThat(reasonPayload.getSubject()).isEqualTo(reasonSubject);
+                    .emit(eq(NotificationReasonConst.SOMEONE_REPLIED_TO_YOU), assertArg(consumer -> {
+                        var builder = ReasonPayload.builder();
+                        consumer.accept(builder);
+                        var reasonPayload = builder.build();
+                        var reasonSubject = Reason.Subject.builder()
+                                .apiVersion(quoteReply.getApiVersion())
+                                .kind(quoteReply.getKind())
+                                .name(quoteReply.getMetadata().getName())
+                                .title(quoteReply.getSpec().getContent())
+                                .build();
+                        assertThat(reasonPayload.getSubject()).isEqualTo(reasonSubject);
 
-                    assertThat(reasonPayload.getAuthor())
-                        .isEqualTo(
-                            UserIdentity.of(reply.getSpec().getOwner().getName()));
+                        assertThat(reasonPayload.getAuthor())
+                                .isEqualTo(UserIdentity.of(
+                                        reply.getSpec().getOwner().getName()));
 
-                    assertThat(reasonPayload.getAttributes()).containsAllEntriesOf(Map.of(
-                        "commentContent", comment.getSpec().getContent(),
-                        "isQuoteReply", true,
-                        "quoteContent", quoteReply.getSpec().getContent(),
-                        "commentName", comment.getMetadata().getName(),
-                        "replier", reply.getSpec().getOwner().getDisplayName(),
-                        "content", reply.getSpec().getContent(),
-                        "replyName", reply.getMetadata().getName()
-                    ));
-                }));
+                        assertThat(reasonPayload.getAttributes())
+                                .containsEntry(
+                                        "replyUrl",
+                                        "https://example.test/post#halo-comment="
+                                                + comment.getMetadata().getName() + "&reply=fake-reply")
+                                .containsEntry("commentSubjectUrl", "https://example.test/post")
+                                .containsAllEntriesOf(Map.of(
+                                        "commentContent", comment.getSpec().getContent(),
+                                        "isQuoteReply", true,
+                                        "quoteContent", quoteReply.getSpec().getContent(),
+                                        "commentName", comment.getMetadata().getName(),
+                                        "replier", reply.getSpec().getOwner().getDisplayName(),
+                                        "content", reply.getSpec().getContent(),
+                                        "replyName", reply.getMetadata().getName()));
+                    }));
+        }
+
+        @ParameterizedTest
+        @CsvSource({
+            "false, false, true,  true, true",
+            "true,  false, true,  true, true",
+            "true,  true,  true,  true, false",
+            "true,  false, false, true, false",
+            "false, false, true,  false, false",
+            "false, true,  true,  true, true"
+        })
+        void privateReplyLinkRequiresRecipientAccessToParent(
+                boolean quoted,
+                boolean parentHidden,
+                boolean parentApproved,
+                boolean registeredRecipient,
+                boolean expectLink) {
+            var subject = mock(PostCommentSubject.class);
+            when(extensionGetter.getExtensions(CommentSubject.class)).thenReturn(Flux.just(subject));
+            when(subject.supports(any())).thenReturn(true);
+            when(subject.getSubjectDisplay(any()))
+                    .thenReturn(Mono.just(new CommentSubject.SubjectDisplay("Post", "/post", "Post")));
+            when(externalLinkProcessor.processLink("/post")).thenReturn("https://example.test/post");
+            when(commentContentConverter.convertRelativeLinks(anyString()))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            when(notificationReasonEmitter.emit(any(), any())).thenReturn(Mono.empty());
+
+            var comment = createComment();
+            comment.getSpec().setContent("comment-content");
+            comment.getSpec().setApproved(parentApproved);
+            comment.getSpec().setHidden(parentHidden);
+            var recipient = comment.getSpec().getOwner();
+            if (registeredRecipient) {
+                recipient.setKind(User.KIND);
+                recipient.setName("recipient");
+            }
+
+            var reply = createReply("private-reply");
+            reply.getSpec().setApproved(true);
+            reply.getSpec().setHidden(true);
+            if (quoted) {
+                var quoteReply = createReply("quote");
+                quoteReply.getSpec().setOwner(recipient);
+                reply.getSpec().setQuoteReply("quote");
+                when(client.fetch(Reply.class, "quote")).thenReturn(Optional.of(quoteReply));
+                comment.getSpec().setOwner(createComment().getSpec().getOwner());
+            }
+
+            newReplyReasonPublisher.publishReasonBy(reply, comment);
+
+            verify(notificationReasonEmitter)
+                    .emit(eq(NotificationReasonConst.SOMEONE_REPLIED_TO_YOU), assertArg(consumer -> {
+                        var builder = ReasonPayload.builder();
+                        consumer.accept(builder);
+                        var attributes = builder.build().getAttributes();
+                        assertThat(attributes).containsEntry("content", "fake-reply-content");
+                        assertThat(attributes)
+                                .containsEntry(
+                                        "commentContent",
+                                        quoted && (parentHidden || !parentApproved) ? "" : "comment-content");
+                        assertThat(attributes.containsKey("replyUrl")).isEqualTo(expectLink);
+                    }));
+        }
+
+        @ParameterizedTest
+        @CsvSource(
+                value = {
+                    "false, false, true,  false, 0",
+                    "false, true,  false, false, 1",
+                    "false, null,  false, false, 1",
+                    "true,  false, true,  false, 0",
+                    "true,  true,  false, false, 1",
+                    "true,  null,  false, false, 1",
+                    "false, true,  true,  true,  0",
+                    "true,  true,  true,  true,  0"
+                },
+                nullValues = "null")
+        void publishRespectsRecipientNotificationPreference(
+                boolean isQuoteReply,
+                Boolean allowNotification,
+                boolean replierAllowNotification,
+                boolean selfReply,
+                int notifications) {
+            var comment = createComment();
+            comment.getSpec().setContent("comment-content");
+            comment.getSpec().setAllowNotification(false);
+            var reply = createReply("current");
+            reply.getSpec().setAllowNotification(replierAllowNotification);
+            Comment.BaseCommentSpec repliedSpec = comment.getSpec();
+            if (isQuoteReply) {
+                var quoteReply = createReply("quote");
+                quoteReply.getSpec().getOwner().setName("another-user");
+                reply.getSpec().setQuoteReply("quote");
+                when(client.fetch(Reply.class, "quote")).thenReturn(Optional.of(quoteReply));
+                repliedSpec = quoteReply.getSpec();
+            }
+            repliedSpec.setAllowNotification(allowNotification);
+            if (selfReply) {
+                reply.getSpec().setOwner(repliedSpec.getOwner());
+            }
+            lenient().when(extensionGetter.getExtensions(CommentSubject.class)).thenReturn(Flux.empty());
+            lenient()
+                    .when(commentContentConverter.convertRelativeLinks(anyString()))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            lenient().when(notificationReasonEmitter.emit(any(), any())).thenReturn(Mono.empty());
+
+            newReplyReasonPublisher.publishReasonBy(reply, comment);
+
+            verify(notificationReasonEmitter, times(notifications))
+                    .emit(eq(NotificationReasonConst.SOMEONE_REPLIED_TO_YOU), any());
         }
 
         @Test
@@ -422,20 +772,20 @@ class CommentNotificationReasonPublisherTest {
             final var quoteReply = createReply("quote");
             final var comment = createComment();
 
-            assertThat(newReplyReasonPublisher
-                .doNotEmitReason(currentReply, quoteReply, comment)).isTrue();
+            assertThat(newReplyReasonPublisher.doNotEmitReason(currentReply, quoteReply, comment))
+                    .isTrue();
 
             currentReply.getSpec().getOwner().setName("other");
-            assertThat(newReplyReasonPublisher
-                .doNotEmitReason(currentReply, quoteReply, comment)).isFalse();
+            assertThat(newReplyReasonPublisher.doNotEmitReason(currentReply, quoteReply, comment))
+                    .isFalse();
 
             currentReply.getSpec().setQuoteReply(null);
-            assertThat(newReplyReasonPublisher
-                .doNotEmitReason(currentReply, quoteReply, comment)).isFalse();
+            assertThat(newReplyReasonPublisher.doNotEmitReason(currentReply, quoteReply, comment))
+                    .isFalse();
 
             currentReply.getSpec().setOwner(comment.getSpec().getOwner());
-            assertThat(newReplyReasonPublisher
-                .doNotEmitReason(currentReply, quoteReply, comment)).isTrue();
+            assertThat(newReplyReasonPublisher.doNotEmitReason(currentReply, quoteReply, comment))
+                    .isTrue();
         }
 
         static Reply createReply(String name) {
@@ -463,8 +813,7 @@ class CommentNotificationReasonPublisherTest {
         commentOwner.setKind(Comment.CommentOwner.KIND_EMAIL);
         commentOwner.setName("example@example.com");
         comment.getSpec().setOwner(commentOwner);
-        comment.getSpec().setSubjectRef(
-            Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
+        comment.getSpec().setSubjectRef(Ref.of("fake-post", GroupVersionKind.fromExtension(Post.class)));
         return comment;
     }
 }

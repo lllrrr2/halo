@@ -1,65 +1,61 @@
 <script lang="ts" setup>
 import {
-  Dialog,
+  PluginStatusPhaseEnum,
+  consoleApiClient,
+  paginate,
+  type Plugin,
+  type PluginV1alpha1ConsoleApiListPluginsRequest,
+} from "@halo-dev/api-client";
+import {
   IconAddCircle,
   IconPlug,
   IconRefreshLine,
+  IconSettings,
   VButton,
   VCard,
   VDropdown,
   VDropdownItem,
   VEmpty,
+  VEntityContainer,
+  VFilterDropdown,
+  VFilterDropdownGroup,
   VLoading,
   VPageHeader,
   VSpace,
 } from "@halo-dev/components";
-import PluginListItem from "./components/PluginListItem.vue";
-import PluginInstallationModal from "./components/PluginInstallationModal.vue";
-import type { Ref } from "vue";
-import { computed, onMounted, provide, ref, watch } from "vue";
-import { apiClient } from "@/utils/api-client";
-import { usePermission } from "@/utils/permission";
+import { utils } from "@halo-dev/ui-shared";
 import { useQuery } from "@tanstack/vue-query";
-import { PluginStatusPhaseEnum, type Plugin } from "@halo-dev/api-client";
-import { useI18n } from "vue-i18n";
+import { useFuse } from "@vueuse/integrations/useFuse";
 import { useRouteQuery } from "@vueuse/router";
+import type { Ref } from "vue";
+import { computed, provide, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import PluginInstallationModal from "./components/PluginInstallationModal.vue";
+import PluginListItem from "./components/PluginListItem.vue";
 import { usePluginBatchOperations } from "./composables/use-plugin";
 
 const { t } = useI18n();
-const { currentUserHasPermission } = usePermission();
 
 const pluginInstallationModalVisible = ref(false);
 
-const keyword = ref("");
+const keyword = useRouteQuery<string>("keyword", "");
 
-const selectedEnabledValue = ref();
-const selectedSortValue = ref();
+const selectedEnabledValue = useRouteQuery<string | undefined>("enabled");
+const selectedSortValue = useRouteQuery<string | undefined>("sort");
 
-const hasFilters = computed(() => {
-  return selectedEnabledValue.value !== undefined || selectedSortValue.value;
-});
-
-function handleClearFilters() {
-  selectedSortValue.value = undefined;
-  selectedEnabledValue.value = undefined;
-}
-
-const total = ref(0);
-
-const { data, isLoading, isFetching, refetch } = useQuery<Plugin[]>({
-  queryKey: ["plugins", keyword, selectedEnabledValue, selectedSortValue],
+const { data, isLoading, isFetching, refetch } = useQuery({
+  queryKey: ["plugins", selectedEnabledValue, selectedSortValue],
   queryFn: async () => {
-    const { data } = await apiClient.plugin.listPlugins({
-      page: 0,
-      size: 0,
-      keyword: keyword.value,
-      enabled: selectedEnabledValue.value,
-      sort: [selectedSortValue.value].filter(Boolean) as string[],
-    });
-
-    total.value = data.total;
-
-    return data.items;
+    return await paginate<PluginV1alpha1ConsoleApiListPluginsRequest, Plugin>(
+      (params) => consoleApiClient.plugin.plugin.listPlugins(params),
+      {
+        size: 1000,
+        enabled: selectedEnabledValue.value
+          ? JSON.parse(selectedEnabledValue.value)
+          : undefined,
+        sort: [selectedSortValue.value].filter(Boolean) as string[],
+      }
+    );
   },
   keepPreviousData: true,
   refetchInterval: (data) => {
@@ -86,6 +82,17 @@ const { data, isLoading, isFetching, refetch } = useQuery<Plugin[]>({
   },
 });
 
+const { results } = useFuse(
+  keyword,
+  computed(() => data.value || []),
+  {
+    fuseOptions: {
+      keys: ["metadata.name", "spec.displayName", "spec.description"],
+    },
+    matchAllWhenSearchEmpty: true,
+  }
+);
+
 // selection
 const selectedNames = ref<string[]>([]);
 provide<Ref<string[]>>("selectedNames", selectedNames);
@@ -94,7 +101,7 @@ const checkedAll = ref(false);
 watch(
   () => selectedNames.value,
   (value) => {
-    checkedAll.value = value.length === data.value?.length;
+    checkedAll.value = value.length === results.value?.length;
   }
 );
 
@@ -102,8 +109,8 @@ const handleCheckAllChange = (e: Event) => {
   const { checked } = e.target as HTMLInputElement;
   if (checked) {
     selectedNames.value =
-      data.value?.map((plugin) => {
-        return plugin.metadata.name;
+      results.value?.map((plugin) => {
+        return plugin.item.metadata.name;
       }) || [];
   } else {
     selectedNames.value.length = 0;
@@ -112,51 +119,40 @@ const handleCheckAllChange = (e: Event) => {
 
 const { handleChangeStatusInBatch, handleUninstallInBatch } =
   usePluginBatchOperations(selectedNames);
-
-// handle remote download url from route
-const routeRemoteDownloadUrl = useRouteQuery<string | null>(
-  "remote-download-url"
-);
-onMounted(() => {
-  if (routeRemoteDownloadUrl.value) {
-    Dialog.warning({
-      title: t("core.plugin.operations.remote_download.title"),
-      description: t("core.plugin.operations.remote_download.description", {
-        url: routeRemoteDownloadUrl.value,
-      }),
-      confirmText: t("core.common.buttons.download"),
-      cancelText: t("core.common.buttons.cancel"),
-      onConfirm() {
-        pluginInstallationModalVisible.value = true;
-      },
-      onCancel() {
-        routeRemoteDownloadUrl.value = null;
-      },
-    });
-  }
-});
 </script>
 <template>
   <PluginInstallationModal
     v-if="
       pluginInstallationModalVisible &&
-      currentUserHasPermission(['system:plugins:manage'])
+      utils.permission.has(['system:plugins:manage'])
     "
     @close="pluginInstallationModalVisible = false"
   />
 
   <VPageHeader :title="$t('core.plugin.title')">
     <template #icon>
-      <IconPlug class="mr-2 self-center" />
+      <IconPlug />
     </template>
     <template #actions>
+      <HasPermission :permissions="['*']">
+        <VButton
+          size="sm"
+          @click="$router.push({ name: 'PluginExtensionPointSettings' })"
+        >
+          <template #icon>
+            <IconSettings />
+          </template>
+          {{ $t("core.plugin.actions.extension-point-settings") }}
+        </VButton>
+      </HasPermission>
+
       <VButton
         v-permission="['system:plugins:manage']"
         type="secondary"
         @click="pluginInstallationModalVisible = true"
       >
         <template #icon>
-          <IconAddCircle class="h-full w-full" />
+          <IconAddCircle />
         </template>
         {{ $t("core.common.buttons.install") }}
       </VButton>
@@ -171,7 +167,7 @@ onMounted(() => {
             class="relative flex flex-col flex-wrap items-start gap-4 sm:flex-row sm:items-center"
           >
             <div
-              v-permission="['system:posts:manage']"
+              v-permission="['system:plugins:manage']"
               class="hidden items-center sm:flex"
             >
               <input
@@ -181,7 +177,11 @@ onMounted(() => {
               />
             </div>
             <div class="flex w-full flex-1 items-center gap-2 sm:w-auto">
-              <SearchInput v-if="!selectedNames.length" v-model="keyword" />
+              <SearchInput
+                v-if="!selectedNames.length"
+                v-model="keyword"
+                sync
+              />
               <VSpace v-else>
                 <VButton @click="handleChangeStatusInBatch(true)">
                   {{ $t("core.common.buttons.activate") }}
@@ -215,55 +215,58 @@ onMounted(() => {
               </VSpace>
             </div>
             <VSpace spacing="lg" class="flex-wrap">
-              <FilterCleanButton
-                v-if="hasFilters"
-                @click="handleClearFilters"
-              />
-              <FilterDropdown
-                v-model="selectedEnabledValue"
-                :label="$t('core.common.filters.labels.status')"
-                :items="[
-                  {
-                    label: t('core.common.filters.item_labels.all'),
-                  },
-                  {
-                    label: t('core.plugin.filters.status.items.active'),
-                    value: true,
-                  },
-                  {
-                    label: t('core.plugin.filters.status.items.inactive'),
-                    value: false,
-                  },
-                ]"
-              />
-              <FilterDropdown
-                v-model="selectedSortValue"
-                :label="$t('core.common.filters.labels.sort')"
-                :items="[
-                  {
-                    label: t('core.common.filters.item_labels.default'),
-                  },
-                  {
-                    label: t('core.plugin.filters.sort.items.create_time_desc'),
-                    value: 'creationTimestamp,desc',
-                  },
-                  {
-                    label: t('core.plugin.filters.sort.items.create_time_asc'),
-                    value: 'creationTimestamp,asc',
-                  },
-                ]"
-              />
+              <VFilterDropdownGroup
+                :clear-label="$t('core.common.buttons.reset')"
+              >
+                <VFilterDropdown
+                  v-model="selectedEnabledValue"
+                  :label="$t('core.common.filters.labels.status')"
+                  show-clear-option
+                  :clear-label="t('core.common.filters.item_labels.all')"
+                  :options="[
+                    {
+                      label: t('core.plugin.filters.status.items.active'),
+                      value: 'true',
+                    },
+                    {
+                      label: t('core.plugin.filters.status.items.inactive'),
+                      value: 'false',
+                    },
+                  ]"
+                />
+                <VFilterDropdown
+                  v-model="selectedSortValue"
+                  :label="$t('core.common.filters.labels.sort')"
+                  show-clear-option
+                  :clear-label="t('core.common.filters.item_labels.default')"
+                  :options="[
+                    {
+                      label: t(
+                        'core.plugin.filters.sort.items.create_time_desc'
+                      ),
+                      value: 'creationTimestamp,desc',
+                    },
+                    {
+                      label: t(
+                        'core.plugin.filters.sort.items.create_time_asc'
+                      ),
+                      value: 'creationTimestamp,asc',
+                    },
+                  ]"
+                />
+              </VFilterDropdownGroup>
               <div class="flex flex-row gap-2">
-                <div
+                <button
+                  v-tooltip="$t('core.common.buttons.refresh')"
+                  type="button"
                   class="group cursor-pointer rounded p-1 hover:bg-gray-200"
                   @click="refetch()"
                 >
                   <IconRefreshLine
-                    v-tooltip="$t('core.common.buttons.refresh')"
                     :class="{ 'animate-spin text-gray-900': isFetching }"
                     class="h-4 w-4 text-gray-600 group-hover:text-gray-900"
                   />
-                </div>
+                </button>
               </div>
             </VSpace>
           </div>
@@ -272,7 +275,7 @@ onMounted(() => {
 
       <VLoading v-if="isLoading" />
 
-      <Transition v-else-if="!data?.length" appear name="fade">
+      <Transition v-else-if="!results?.length" appear name="fade">
         <VEmpty
           :message="$t('core.plugin.empty.message')"
           :title="$t('core.plugin.empty.title')"
@@ -288,7 +291,7 @@ onMounted(() => {
                 @click="pluginInstallationModalVisible = true"
               >
                 <template #icon>
-                  <IconAddCircle class="h-full w-full" />
+                  <IconAddCircle />
                 </template>
                 {{ $t("core.plugin.empty.actions.install") }}
               </VButton>
@@ -298,23 +301,24 @@ onMounted(() => {
       </Transition>
 
       <Transition v-else appear name="fade">
-        <ul
-          class="box-border h-full w-full divide-y divide-gray-100"
-          role="list"
-        >
-          <li v-for="plugin in data" :key="plugin.metadata.name">
-            <PluginListItem
-              :plugin="plugin"
-              :is-selected="selectedNames.includes(plugin.metadata.name)"
-            />
-          </li>
-        </ul>
+        <VEntityContainer>
+          <PluginListItem
+            v-for="result in results"
+            :key="result.item.metadata.name"
+            :plugin="result.item"
+            :is-selected="selectedNames.includes(result.item.metadata.name)"
+          />
+        </VEntityContainer>
       </Transition>
 
       <template #footer>
         <div class="flex h-8 items-center">
           <span class="text-sm text-gray-500">
-            {{ $t("core.components.pagination.total_label", { total: total }) }}
+            {{
+              $t("core.components.pagination.total_label", {
+                total: results?.length,
+              })
+            }}
           </span>
         </div>
       </template>

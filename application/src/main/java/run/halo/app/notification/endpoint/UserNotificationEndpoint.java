@@ -1,11 +1,13 @@
 package run.halo.app.notification.endpoint;
 
+import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
 import static org.springdoc.core.fn.builders.apiresponse.Builder.responseBuilder;
 import static org.springdoc.core.fn.builders.content.Builder.contentBuilder;
 import static org.springdoc.core.fn.builders.parameter.Builder.parameterBuilder;
 import static org.springdoc.core.fn.builders.requestbody.Builder.requestBodyBuilder;
 
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -40,96 +42,144 @@ public class UserNotificationEndpoint implements CustomEndpoint {
     @Override
     public RouterFunction<ServerResponse> endpoint() {
         return SpringdocRouteBuilder.route()
-            .nest(RequestPredicates.path("/userspaces/{username}"), userspaceScopedApis(),
-                builder -> {
-                })
-            .build();
+                .nest(RequestPredicates.path("/userspaces/{username}"), userspaceScopedApis())
+                .build();
     }
 
     Supplier<RouterFunction<ServerResponse>> userspaceScopedApis() {
-        var tag = "api.notification.halo.run/v1alpha1/Notification";
+        var tag = "NotificationV1alpha1Uc";
         return () -> SpringdocRouteBuilder.route()
-            .GET("/notifications", this::listNotification,
-                builder -> {
+                .GET("/notifications", this::listNotification, builder -> {
                     builder.operationId("ListUserNotifications")
-                        .description("List notifications for the authenticated user.")
-                        .tag(tag)
-                        .parameter(parameterBuilder()
-                            .in(ParameterIn.PATH)
-                            .name("username")
-                            .description("Username")
-                            .required(true)
-                        )
-                        .response(responseBuilder()
-                            .implementation(ListResult.generateGenericClass(Notification.class))
-                        );
+                            .description("List notifications for the authenticated user.")
+                            .tag(tag)
+                            .parameter(parameterBuilder()
+                                    .in(ParameterIn.PATH)
+                                    .name("username")
+                                    .description("User metadata.name")
+                                    .required(true))
+                            .response(responseBuilder()
+                                    .implementation(ListResult.generateGenericClass(Notification.class)));
                     UserNotificationQuery.buildParameters(builder);
-                }
-            )
-            .PUT("/notifications/{name}/mark-as-read", this::markNotificationAsRead,
-                builder -> builder.operationId("MarkNotificationAsRead")
-                    .description("Mark the specified notification as read.")
-                    .tag(tag)
-                    .parameter(parameterBuilder()
-                        .in(ParameterIn.PATH)
-                        .name("username")
-                        .description("Username")
-                        .required(true)
-                    )
-                    .parameter(parameterBuilder()
-                        .in(ParameterIn.PATH)
-                        .name("name")
-                        .description("Notification name")
-                        .required(true)
-                    )
-                    .response(responseBuilder().implementation(Notification.class))
-            )
-            .PUT("/notifications/-/mark-specified-as-read", this::markNotificationsAsRead,
-                builder -> builder.operationId("MarkNotificationsAsRead")
-                    .description("Mark the specified notifications as read.")
-                    .tag(tag)
-                    .parameter(parameterBuilder()
-                        .in(ParameterIn.PATH)
-                        .name("username")
-                        .description("Username")
-                        .required(true)
-                    )
-                    .requestBody(requestBodyBuilder()
-                        .required(true)
-                        .content(contentBuilder()
-                            .mediaType(MediaType.APPLICATION_JSON_VALUE)
-                            .schema(Builder.schemaBuilder()
-                                .implementation(MarkSpecifiedRequest.class))
-                        )
-                    )
-                    .response(responseBuilder().implementationArray(String.class))
-            )
-            .DELETE("/notifications/{name}", this::deleteNotification,
-                builder -> builder.operationId("DeleteSpecifiedNotification")
-                    .description("Delete the specified notification.")
-                    .tag(tag)
-                    .parameter(parameterBuilder()
-                        .in(ParameterIn.PATH)
-                        .name("username")
-                        .description("Username")
-                        .required(true)
-                    )
-                    .parameter(parameterBuilder()
-                        .in(ParameterIn.PATH)
-                        .name("name")
-                        .description("Notification name")
-                        .required(true)
-                    )
-                    .response(responseBuilder().implementation(Notification.class))
-            )
-            .build();
+                })
+                .GET(
+                        "/notifications/{name}",
+                        this::getNotification,
+                        builder -> builder.operationId("GetSpecifiedNotification")
+                                .description("Get the specified notification.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("name")
+                                        .description("Notification metadata.name")
+                                        .required(true))
+                                .response(responseBuilder().implementation(Notification.class)))
+                .PUT(
+                        "/notifications/{name}/mark-as-read",
+                        this::markNotificationAsRead,
+                        builder -> builder.operationId("MarkNotificationAsRead")
+                                .description("Mark the specified notification as read.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("name")
+                                        .description("Notification metadata.name")
+                                        .required(true))
+                                .response(responseBuilder().implementation(Notification.class)))
+                .PUT(
+                        "/notifications/-/mark-specified-as-read",
+                        this::markNotificationsAsRead,
+                        builder -> builder.operationId("MarkNotificationsAsRead")
+                                .description("Mark the specified notifications as read.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .requestBody(requestBodyBuilder()
+                                        .required(true)
+                                        .content(contentBuilder()
+                                                .mediaType(MediaType.APPLICATION_JSON_VALUE)
+                                                .schema(Builder.schemaBuilder()
+                                                        .implementation(MarkSpecifiedRequest.class))))
+                                .response(responseBuilder().implementationArray(String.class)))
+                .PUT(
+                        "/notifications/-/mark-all-as-read",
+                        this::markAllNotificationsAsRead,
+                        builder -> builder.operationId("MarkAllNotificationsAsRead")
+                                .description("Mark all notifications as read.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .response(responseBuilder().implementationArray(String.class)))
+                .DELETE(
+                        "/notifications",
+                        this::deleteAllNotifications,
+                        builder -> builder.operationId("DeleteAllNotifications")
+                                .description("Delete all notifications matching the given field selector.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.QUERY)
+                                        .name("fieldSelector")
+                                        .description("Field selector for filtering. e.g.: spec.unread=true")
+                                        .required(false)
+                                        .implementationArray(String.class))
+                                .response(responseBuilder()
+                                        .responseCode("200")
+                                        .description("Notifications deleted successfully.")))
+                .DELETE(
+                        "/notifications/{name}",
+                        this::deleteNotification,
+                        builder -> builder.operationId("DeleteSpecifiedNotification")
+                                .description("Delete the specified notification.")
+                                .tag(tag)
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("username")
+                                        .description("User metadata.name")
+                                        .required(true))
+                                .parameter(parameterBuilder()
+                                        .in(ParameterIn.PATH)
+                                        .name("name")
+                                        .description("Notification metadata.name")
+                                        .required(true))
+                                .response(responseBuilder().implementation(Notification.class)))
+                .build();
     }
 
     private Mono<ServerResponse> deleteNotification(ServerRequest request) {
         var name = request.pathVariable("name");
         var username = request.pathVariable("username");
-        return notificationService.deleteByName(username, name)
-            .flatMap(notification -> ServerResponse.ok().bodyValue(notification));
+        return notificationService
+                .deleteByName(username, name)
+                .flatMap(notification -> ServerResponse.ok().bodyValue(notification));
+    }
+
+    private Mono<ServerResponse> deleteAllNotifications(ServerRequest request) {
+        var username = request.pathVariable("username");
+        var query = new UserNotificationQuery(request.exchange(), username);
+        return notificationService
+                .deleteAllByUser(query)
+                .then(ServerResponse.ok().build());
     }
 
     @Override
@@ -137,29 +187,51 @@ public class UserNotificationEndpoint implements CustomEndpoint {
         return GroupVersion.parseAPIVersion("api.notification.halo.run/v1alpha1");
     }
 
-    record MarkSpecifiedRequest(List<String> names) {
-    }
+    /**
+     * Payload for marking multiple notifications as read.
+     *
+     * @param names notification {@code metadata.name} values to mark as read
+     */
+    record MarkSpecifiedRequest(
+            @Schema(requiredMode = REQUIRED) List<String> names) {}
 
     private Mono<ServerResponse> listNotification(ServerRequest request) {
         var username = request.pathVariable("username");
         var query = new UserNotificationQuery(request.exchange(), username);
-        return notificationService.listByUser(username, query)
-            .flatMap(notifications -> ServerResponse.ok().bodyValue(notifications));
+        return notificationService
+                .listByUser(username, query)
+                .flatMap(notifications -> ServerResponse.ok().bodyValue(notifications));
+    }
+
+    private Mono<ServerResponse> getNotification(ServerRequest request) {
+        var username = request.pathVariable("username");
+        var name = request.pathVariable("name");
+        return notificationService
+                .getByName(username, name)
+                .flatMap(notification -> ServerResponse.ok().bodyValue(notification));
     }
 
     private Mono<ServerResponse> markNotificationAsRead(ServerRequest request) {
         var username = request.pathVariable("username");
         var name = request.pathVariable("name");
-        return notificationService.markAsRead(username, name)
-            .flatMap(notification -> ServerResponse.ok().bodyValue(notification));
+        return notificationService
+                .markAsRead(username, name)
+                .flatMap(notification -> ServerResponse.ok().bodyValue(notification));
+    }
+
+    Mono<ServerResponse> markAllNotificationsAsRead(ServerRequest request) {
+        var username = request.pathVariable("username");
+        return notificationService
+                .markAllAsRead(username)
+                .collectList()
+                .flatMap(names -> ServerResponse.ok().bodyValue(names));
     }
 
     Mono<ServerResponse> markNotificationsAsRead(ServerRequest request) {
         var username = request.pathVariable("username");
         return request.bodyToMono(MarkSpecifiedRequest.class)
-            .flatMapMany(
-                requestBody -> notificationService.markSpecifiedAsRead(username, requestBody.names))
-            .collectList()
-            .flatMap(names -> ServerResponse.ok().bodyValue(names));
+                .flatMapMany(requestBody -> notificationService.markSpecifiedAsRead(username, requestBody.names))
+                .collectList()
+                .flatMap(names -> ServerResponse.ok().bodyValue(names));
     }
 }

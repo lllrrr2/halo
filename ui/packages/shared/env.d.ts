@@ -1,16 +1,9 @@
-/// <reference types="vite/client" />
+/// <reference types="vite-plus/client" />
 
 export {};
 
 import type { Component } from "vue";
 import type { CoreMenuGroupId } from "./src/types/menus";
-
-declare module "*.vue" {
-  import type { DefineComponent } from "vue";
-  // eslint-disable-next-line
-  const component: DefineComponent<{}, {}, any>;
-  export default component;
-}
 
 declare module "vue-router" {
   interface RouteMeta {

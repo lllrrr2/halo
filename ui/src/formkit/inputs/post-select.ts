@@ -1,29 +1,84 @@
-import { postLabels } from "@/constants/labels";
-import { apiClient } from "@/utils/api-client";
 import type { FormKitNode, FormKitTypeDefinition } from "@formkit/core";
-import { select, selects, defaultIcon } from "@formkit/inputs";
+import type { FormKitInputs } from "@formkit/inputs";
+import {
+  consoleApiClient,
+  paginate,
+  type ListedPost,
+  type PostV1alpha1ConsoleApiListPostsRequest,
+} from "@halo-dev/api-client";
+import { postLabels } from "@/constants/labels";
+import { select } from "./select";
 
-function optionsHandler(node: FormKitNode) {
-  node.on("created", async () => {
-    const { data } = await apiClient.post.listPosts({
-      labelSelector: [
-        `${postLabels.DELETED}=false`,
-        `${postLabels.PUBLISHED}=true`,
-      ],
-    });
+async function search({ page, size, keyword }) {
+  const { data } = await consoleApiClient.content.post.listPosts({
+    page,
+    size,
+    keyword,
+    labelSelector: [
+      `${postLabels.DELETED}=false`,
+      `${postLabels.PUBLISHED}=true`,
+    ],
+  });
 
-    node.props.options = data.items.map((post) => {
+  return {
+    options: data.items.map((post) => {
       return {
         value: post.post.metadata.name,
         label: post.post.spec.title,
       };
-    });
+    }),
+    total: data.total,
+    size: data.size,
+    page: data.page,
+  };
+}
+
+async function findOptionsByValues(values: string[]) {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const posts = await paginate<
+    PostV1alpha1ConsoleApiListPostsRequest,
+    ListedPost
+  >((params) => consoleApiClient.content.post.listPosts(params), {
+    fieldSelector: [`metadata.name=(${values.join(",")})`],
+    size: 1000,
+  });
+
+  return posts.map((post) => {
+    return {
+      value: post.post.metadata.name,
+      label: post.post.spec.title,
+    };
+  });
+}
+
+function optionsHandler(node: FormKitNode) {
+  node.on("created", async () => {
+    node.props = {
+      ...node.props,
+      remote: true,
+      remoteOption: {
+        search,
+        findOptionsByValues,
+      },
+      searchable: true,
+    };
   });
 }
 
 export const postSelect: FormKitTypeDefinition = {
   ...select,
-  props: ["placeholder"],
   forceTypeProp: "select",
-  features: [optionsHandler, selects, defaultIcon("select", "select")],
+  features: [optionsHandler],
 };
+
+declare module "@formkit/inputs" {
+  export interface FormKitInputProps<Props extends FormKitInputs<Props>> {
+    postSelect: {
+      type: "postSelect";
+      value?: string;
+    };
+  }
+}

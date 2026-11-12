@@ -1,6 +1,18 @@
+import type { OperationItem } from "@halo-dev/ui-shared";
+import { useQuery } from "@tanstack/vue-query";
+import { computed, markRaw, toValue, type ComputedRef, type Ref } from "vue";
 import { usePluginModuleStore } from "@/stores/plugin";
-import type { OperationItem, PluginModule } from "@halo-dev/console-shared";
-import { onMounted, ref, type ComputedRef, type Ref, computed } from "vue";
+
+function markOperationComponentsRaw<T>(items: OperationItem<T>[]) {
+  for (const item of items) {
+    if (item.component) {
+      markRaw(item.component);
+    }
+    if (item.children) {
+      markOperationComponentsRaw(item.children);
+    }
+  }
+}
 
 export function useOperationItemExtensionPoint<T>(
   extensionPointName: string,
@@ -9,28 +21,43 @@ export function useOperationItemExtensionPoint<T>(
 ) {
   const { pluginModules } = usePluginModuleStore();
 
-  const itemsFromPlugins = ref<OperationItem<T>[]>([]);
+  const query = useQuery({
+    // Deep structural sharing would clone component definitions and lose markRaw.
+    structuralSharing: false,
+    queryKey: computed(() => [
+      "core:extension-points:operation-items",
+      extensionPointName,
+      toValue(entity),
+    ]),
+    queryFn: async () => {
+      const itemsFromPlugins: OperationItem<T>[] = [];
+      for (const pluginModule of pluginModules) {
+        const { extensionPoints } = pluginModule;
+        if (!extensionPoints?.[extensionPointName]) {
+          continue;
+        }
 
-  onMounted(() => {
-    pluginModules.forEach((pluginModule: PluginModule) => {
-      const { extensionPoints } = pluginModule;
-      if (!extensionPoints?.[extensionPointName]) {
-        return;
+        const items = extensionPoints[extensionPointName](
+          entity
+        ) as OperationItem<T>[];
+
+        markOperationComponentsRaw(items);
+        itemsFromPlugins.push(...items);
       }
 
-      const items = extensionPoints[extensionPointName](
-        entity
-      ) as OperationItem<T>[];
-
-      itemsFromPlugins.value.push(...items);
-    });
+      return itemsFromPlugins;
+    },
+    enabled: computed(() => !!presets.value && !!entity.value),
   });
 
-  const operationItems = computed(() => {
-    return [...presets.value, ...itemsFromPlugins.value].sort((a, b) => {
-      return a.priority - b.priority;
-    });
-  });
-
-  return { operationItems };
+  return {
+    ...query,
+    data: computed(() =>
+      query.data.value
+        ? [...presets.value, ...query.data.value].sort(
+            (a, b) => a.priority - b.priority
+          )
+        : undefined
+    ),
+  };
 }

@@ -1,21 +1,57 @@
-import type { App, Plugin } from "vue";
-import { RichTextEditor } from "./components";
+import "github-markdown-css/github-markdown-light.css";
 import "./styles/index.scss";
 import "./styles/tailwind.css";
-import "floating-vue/dist/style.css";
-import "github-markdown-css/github-markdown-light.css";
-import "highlight.js/styles/github-dark.css";
 
-const plugin: Plugin = {
-  install(app: App) {
-    app.component("RichTextEditor", RichTextEditor);
-  },
-};
-
-export default plugin;
-
-export * from "./tiptap";
-export * from "./extensions";
 export * from "./components";
-export * from "./utils";
-// TODO: export * from "./types";
+export * from "./composables/use-halo-keyboard-shortcut";
+export * from "./editor-metadata";
+export * from "./extensions";
+export * from "./keyboard-shortcuts";
+export * from "./tiptap";
+export * from "./types";
+export {
+  convertToMediaContents,
+  createTextblockFragmentAt,
+  deleteNode,
+  deleteNodeByPos,
+  filterDuplicateExtensions,
+  findAncestorListItems,
+  findGapCursorFrom,
+  generateAnchor,
+  generateAnchorId,
+  getBlockIndentAtSelection,
+  getCursorCoords,
+  getEditorNodeElement,
+  getGapCursorTarget,
+  isGapCursorPosition,
+  isGapCursorTargetNode,
+  isAllowedUri,
+  isBlockEmpty,
+  isEmpty,
+  isListActive,
+  isNodeContentEmpty,
+  findTable,
+  getCellsInColumn,
+  getCellsInRow,
+  getTableHeaderState,
+  hasTableBefore,
+  isCellSelection,
+  isColumnSelected,
+  isRowSelected,
+  isTableSelected,
+  selectColumn,
+  selectRow,
+  selectTable,
+  prepareBlockCommandFromList,
+  resolveGapCursorSide,
+  type AncestorListItem,
+  type GapCursorDirection,
+  type GapCursorSide,
+  type GapCursorTarget,
+  type MatchAttachmentPermalinks,
+  type TableCellPosition,
+  type TablePosition,
+  type TableHeaderState,
+  type Upload,
+  type UploadFile,
+} from "./utils";

@@ -1,14 +1,13 @@
 package run.halo.app.content.comment;
 
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.content.Post;
-import run.halo.app.extension.GroupVersionKind;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Ref;
-import run.halo.app.infra.ExternalLinkProcessor;
 
 /**
  * Comment subject for post.
@@ -21,7 +20,6 @@ import run.halo.app.infra.ExternalLinkProcessor;
 public class PostCommentSubject implements CommentSubject<Post> {
 
     private final ReactiveExtensionClient client;
-    private final ExternalLinkProcessor externalLinkProcessor;
 
     @Override
     public Mono<Post> get(String name) {
@@ -31,18 +29,14 @@ public class PostCommentSubject implements CommentSubject<Post> {
     @Override
     public Mono<SubjectDisplay> getSubjectDisplay(String name) {
         return get(name)
-            .map(post -> {
-                var url = externalLinkProcessor
-                    .processLink(post.getStatusOrDefault().getPermalink());
-                return new SubjectDisplay(post.getSpec().getTitle(), url, "文章");
-            });
+                .map(post -> new SubjectDisplay(
+                        post.getSpec().getTitle(), post.getStatusOrDefault().getPermalink(), "文章"));
     }
 
     @Override
     public boolean supports(Ref ref) {
         Assert.notNull(ref, "Subject ref must not be null.");
-        GroupVersionKind groupVersionKind =
-            new GroupVersionKind(ref.getGroup(), ref.getVersion(), ref.getKind());
-        return GroupVersionKind.fromExtension(Post.class).equals(groupVersionKind);
+        var gvk = Post.GVK;
+        return Objects.equals(gvk.group(), ref.getGroup()) && Objects.equals(gvk.kind(), ref.getKind());
     }
 }

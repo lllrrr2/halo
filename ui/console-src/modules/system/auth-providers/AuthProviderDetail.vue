@@ -1,9 +1,7 @@
 <script lang="ts" setup>
-import { computed, ref, toRaw } from "vue";
-import { apiClient } from "@/utils/api-client";
-import { useQuery } from "@tanstack/vue-query";
+import type { FormKitSchemaCondition, FormKitSchemaNode } from "@formkit/core";
 import type { AuthProvider, Setting } from "@halo-dev/api-client";
-import { useRoute } from "vue-router";
+import { coreApiClient } from "@halo-dev/api-client";
 import {
   Toast,
   VAvatar,
@@ -14,13 +12,16 @@ import {
   VPageHeader,
   VTabbar,
 } from "@halo-dev/components";
-import { useSettingFormConvert } from "@console/composables/use-setting-form";
+import { useQuery } from "@tanstack/vue-query";
+import { computed, ref, shallowRef, toRaw, toRefs, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute } from "vue-router";
 
-const route = useRoute();
 const { t } = useI18n();
+const route = useRoute();
+const { name } = toRefs(route.params);
 
-const tabs = ref<{ id: string; label: string }[]>([
+const tabs = shallowRef<{ id: string; label: string }[]>([
   {
     id: "detail",
     label: t("core.identity_authentication.tabs.detail"),
@@ -30,42 +31,50 @@ const tabs = ref<{ id: string; label: string }[]>([
 const activeTab = ref<string>("detail");
 
 const { data: authProvider } = useQuery<AuthProvider>({
-  queryKey: ["auth-provider", route.params.name],
+  queryKey: ["auth-provider", name],
   queryFn: async () => {
-    const { data } =
-      await apiClient.extension.authProvider.getauthHaloRunV1alpha1AuthProvider(
-        {
-          name: route.params.name as string,
-        }
-      );
+    const { data } = await coreApiClient.auth.authProvider.getAuthProvider({
+      name: name.value as string,
+    });
     return data;
   },
-  onSuccess(data) {
-    if (data.spec.settingRef?.name) {
-      tabs.value.push({
-        id: "setting",
-        label: t("core.identity_authentication.tabs.setting"),
-      });
-    }
-  },
-  enabled: computed(() => !!route.params.name),
+  enabled: computed(() => !!name.value),
 });
 
-// setting
-const saving = ref(false);
-const group = computed(
-  () => authProvider.value?.spec.settingRef?.group as string
+watch(
+  () => authProvider.value,
+  () => {
+    if (authProvider.value?.spec.settingRef?.name) {
+      tabs.value = [
+        ...tabs.value,
+        {
+          id: "setting",
+          label: t("core.identity_authentication.tabs.setting"),
+        },
+      ];
+    }
+  },
+  {
+    immediate: true,
+  }
 );
 
-const { data: setting, refetch: handleFetchSettings } = useQuery<Setting>({
-  queryKey: [
-    "auth-provider-setting",
-    authProvider.value?.spec.settingRef?.name,
-  ],
+// setting
+const isSubmitting = ref(false);
+const settingName = computed(() => authProvider.value?.spec.settingRef?.name);
+const settingGroup = computed(
+  () => authProvider.value?.spec.settingRef?.group as string
+);
+const configMapName = computed(
+  () => authProvider.value?.spec.configMapRef?.name
+);
+
+const { data: setting, refetch: refetchSettings } = useQuery<Setting>({
+  queryKey: ["auth-provider-setting", settingName.value],
   queryFn: async () => {
-    const { data } = await apiClient.extension.setting.getv1alpha1Setting(
+    const { data } = await coreApiClient.setting.getSetting(
       {
-        name: authProvider.value?.spec.settingRef?.name as string,
+        name: settingName.value as string,
       },
       {
         mute: true,
@@ -73,18 +82,24 @@ const { data: setting, refetch: handleFetchSettings } = useQuery<Setting>({
     );
     return data;
   },
-  enabled: computed(() => !!authProvider.value?.spec.settingRef?.name),
+  enabled: computed(() => !!settingName.value),
 });
 
-const { data: configMap, refetch: handleFetchConfigMap } = useQuery({
-  queryKey: [
-    "auth-provider-configMap",
-    authProvider.value?.spec.configMapRef?.name,
-  ],
+const formSchema = computed(() => {
+  if (!setting.value) {
+    return;
+  }
+  const { forms } = setting.value.spec;
+  return forms.find((item) => item.group === settingGroup.value)
+    ?.formSchema as (FormKitSchemaCondition | FormKitSchemaNode)[];
+});
+
+const { data: configMap, refetch: refetchConfigMap } = useQuery({
+  queryKey: ["auth-provider-configMap", configMapName],
   queryFn: async () => {
-    const { data } = await apiClient.extension.configMap.getv1alpha1ConfigMap(
+    const { data } = await coreApiClient.configMap.getConfigMap(
       {
-        name: authProvider.value?.spec.configMapRef?.name as string,
+        name: configMapName.value as string,
       },
       {
         mute: true,
@@ -95,8 +110,8 @@ const { data: configMap, refetch: handleFetchConfigMap } = useQuery({
   retry: 0,
   onError: async () => {
     const data = {};
-    data[group.value] = "";
-    await apiClient.extension.configMap.createv1alpha1ConfigMap({
+    data[settingGroup.value] = "{}";
+    await coreApiClient.configMap.createConfigMap({
       configMap: {
         apiVersion: "v1alpha1",
         data: data,
@@ -107,48 +122,77 @@ const { data: configMap, refetch: handleFetchConfigMap } = useQuery({
       },
     });
 
-    await handleFetchConfigMap();
+    await refetchConfigMap();
   },
-  enabled: computed(
-    () => !!authProvider.value?.spec.configMapRef?.name && !!setting.value
-  ),
+  enabled: computed(() => !!configMapName.value && !!setting.value),
 });
 
-const { configMapFormData, formSchema, convertToSave } = useSettingFormConvert(
-  setting,
-  configMap,
-  group
-);
+const configMapData = computed(() => {
+  if (!configMap.value) {
+    return {};
+  }
+  return JSON.parse(configMap.value.data?.[settingGroup.value] || "{}");
+});
 
-const handleSaveConfigMap = async () => {
-  saving.value = true;
-  const configMapToUpdate = convertToSave();
-  if (!configMapToUpdate || !authProvider?.value) {
-    saving.value = false;
-    return;
+const onSubmit = async (data: Record<string, unknown>) => {
+  try {
+    isSubmitting.value = true;
+
+    const { data: configMapToUpdate } =
+      await coreApiClient.configMap.getConfigMap({
+        name: configMapName.value as string,
+      });
+
+    await coreApiClient.configMap.updateConfigMap({
+      name: configMapName.value as string,
+      configMap: {
+        ...configMapToUpdate,
+        data: {
+          ...(configMapToUpdate?.data || {}),
+          [settingGroup.value]: JSON.stringify(data),
+        },
+      },
+    });
+    await refetchSettings();
+    await refetchConfigMap();
+    Toast.success(t("core.common.toast.save_success"));
+  } catch (error) {
+    console.error(error);
+    Toast.error(t("core.common.toast.save_failed_and_retry"));
+  } finally {
+    isSubmitting.value = false;
+  }
+};
+
+const displayName = computed(() => {
+  if (!authProvider.value) {
+    return t("core.common.status.loading");
   }
 
-  await apiClient.extension.configMap.updatev1alpha1ConfigMap({
-    name: authProvider.value.spec.configMapRef?.name as string,
-    configMap: configMapToUpdate,
-  });
+  return t(
+    `core.identity_authentication.fields.display_name.${authProvider.value?.metadata.name}`,
+    authProvider.value?.spec.displayName || ""
+  );
+});
 
-  Toast.success(t("core.common.toast.save_success"));
+const description = computed(() => {
+  if (!authProvider.value) {
+    return t("core.common.status.loading");
+  }
 
-  await handleFetchSettings();
-  await handleFetchConfigMap();
-  saving.value = false;
-};
+  return t(
+    `core.identity_authentication.fields.description.${authProvider.value?.metadata.name}`,
+    authProvider.value?.spec.description || ""
+  );
+});
 </script>
 
 <template>
-  <VPageHeader :title="authProvider?.spec.displayName">
+  <VPageHeader :title="displayName">
     <template #icon>
       <VAvatar
-        v-if="authProvider"
-        :src="authProvider.spec.logo"
-        :alt="authProvider.spec.displayName"
-        class="mr-2"
+        :src="authProvider?.spec.logo"
+        :alt="authProvider?.spec.displayName"
         size="sm"
       />
     </template>
@@ -171,13 +215,13 @@ const handleSaveConfigMap = async () => {
               :label="
                 $t('core.identity_authentication.detail.fields.display_name')
               "
-              :content="authProvider?.spec.displayName"
+              :content="displayName"
             />
             <VDescriptionItem
               :label="
                 $t('core.identity_authentication.detail.fields.description')
               "
-              :content="authProvider?.spec.description"
+              :content="description"
             />
             <VDescriptionItem
               :label="$t('core.identity_authentication.detail.fields.website')"
@@ -220,27 +264,26 @@ const handleSaveConfigMap = async () => {
         <div v-if="activeTab === 'setting'" class="bg-white p-4">
           <div>
             <FormKit
-              v-if="group && formSchema && configMapFormData"
-              :id="group"
-              v-model="configMapFormData[group]"
-              :name="group"
-              :actions="false"
+              v-if="settingGroup && formSchema && configMapData"
+              :id="settingGroup"
+              :model-value="configMapData"
+              :name="settingGroup"
               :preserve="true"
               type="form"
-              @submit="handleSaveConfigMap"
+              @submit="onSubmit"
             >
               <FormKitSchema
                 :schema="toRaw(formSchema)"
-                :data="configMapFormData[group]"
+                :data="configMapData"
               />
             </FormKit>
           </div>
           <div class="pt-5">
             <div class="flex justify-start">
               <VButton
-                :loading="saving"
+                :loading="isSubmitting"
                 type="secondary"
-                @click="$formkit.submit(group || '')"
+                @click="$formkit.submit(settingGroup || '')"
               >
                 {{ $t("core.common.buttons.save") }}
               </VButton>

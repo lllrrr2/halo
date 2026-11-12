@@ -1,158 +1,247 @@
+import TiptapCodeBlock from "@tiptap/extension-code-block";
+import { markRaw } from "vue";
+import MingcuteBracesLine from "~icons/mingcute/braces-line";
+import MingcuteDelete2Line from "@/components/icon/MingcuteDelete2Line.vue";
+import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
+import ToolboxItem from "@/components/toolbox/ToolboxItem.vue";
+import { i18n } from "@/locales";
 import {
   Editor,
-  type Range,
-  type CommandProps,
-  isActive,
-  findParentNode,
   VueNodeViewRenderer,
-} from "@/tiptap/vue-3";
-import {
-  EditorState,
-  Plugin,
-  PluginKey,
-  TextSelection,
-  type Transaction,
-} from "@/tiptap/pm";
-import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import type { CodeBlockLowlightOptions } from "@tiptap/extension-code-block-lowlight";
-import CodeBlockViewRenderer from "./CodeBlockViewRenderer.vue";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import MdiCodeBracesBox from "~icons/mdi/code-braces-box";
-import { markRaw } from "vue";
-import { i18n } from "@/locales";
-import ToolboxItem from "@/components/toolbox/ToolboxItem.vue";
-import MdiDeleteForeverOutline from "@/components/icon/MdiDeleteForeverOutline.vue";
+  findParentNode,
+  isActive,
+  isNodeActive,
+  posToDOMRect,
+  type Range,
+} from "@/tiptap";
+import { EditorState, Plugin, PluginKey, TextSelection } from "@/tiptap/pm";
+import type { ExtensionOptions } from "@/types";
 import { deleteNode } from "@/utils";
+import CodeBlockViewRenderer from "./CodeBlockViewRenderer.vue";
+import { setCodeBlockWithIndent } from "./set-code-block-with-indent";
 
-export interface CustomCodeBlockLowlightOptions
-  extends CodeBlockLowlightOptions {
-  lowlight: any;
+interface Option {
+  label: string;
+  value: string;
+}
+
+export interface CodeBlockOptions {
+  /**
+   * Define whether the node should be exited on triple enter.
+   * @default true
+   */
+  exitOnTripleEnter: boolean;
+  /**
+   * Define whether the node should be exited on arrow down if there is no node after it.
+   * @default true
+   */
+  exitOnArrowDown: boolean;
+  /**
+   * Custom HTML attributes that should be added to the rendered HTML tag.
+   * @default {}
+   * @example { class: 'foo' }
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  HTMLAttributes: Record<string, any>;
+
+  /**
+   * The default language for code block
+   * @default null
+   */
   defaultLanguage: string | null | undefined;
+
+  /**
+   * The default theme for code block
+   * @default null
+   */
+  defaultTheme: string | null | undefined;
+
+  /**
+   * Use Tiptap's built-in Tab and Shift-Tab indentation inside code blocks.
+   * @default true
+   */
+  enableTabIndentation: boolean | null | undefined;
+
+  /**
+   * Number of spaces inserted for code indentation.
+   * @default 2
+   */
+  tabSize: number | null | undefined;
 }
 
-declare module "@/tiptap" {
-  interface Commands<ReturnType> {
-    codeIndent: {
-      codeIndent: () => ReturnType;
-      codeOutdent: () => ReturnType;
-    };
-  }
+export interface ExtensionCodeBlockOptions extends CodeBlockOptions {
+  /**
+   * Used for language list
+   *
+   * @default []
+   */
+  languages:
+    | Array<Option>
+    | ((state: EditorState) => Array<{
+        label: string;
+        value: string;
+      }>);
+
+  /**
+   * Used for theme list
+   *
+   * @default []
+   */
+  themes?:
+    | Array<{
+        label: string;
+        value: string;
+      }>
+    | ((state: EditorState) => Array<{
+        label: string;
+        value: string;
+      }>);
 }
 
-type IndentType = "indent" | "outdent";
-const updateIndent = (tr: Transaction, type: IndentType): Transaction => {
-  const { doc, selection } = tr;
-  if (!doc || !selection) return tr;
-  if (!(selection instanceof TextSelection)) {
-    return tr;
-  }
-  const { from, to } = selection;
-  doc.nodesBetween(from, to, (node, pos) => {
-    if (from - to == 0 && type === "indent") {
-      tr.insertText("\t", from, to);
-      return false;
-    }
+export const CODE_BLOCK_BUBBLE_MENU_KEY = new PluginKey("codeBlockBubbleMenu");
 
-    const precedeContent = doc.textBetween(pos + 1, from, "\n");
-    const precedeLineBreakPos = precedeContent.lastIndexOf("\n");
-    const startBetWeenIndex =
-      precedeLineBreakPos === -1 ? pos + 1 : pos + precedeLineBreakPos + 1;
-    const text = doc.textBetween(startBetWeenIndex, to, "\n");
-    if (type === "indent") {
-      let replacedStr = text.replace(/\n/g, "\n\t");
-      if (startBetWeenIndex === pos + 1) {
-        replacedStr = "\t" + replacedStr;
-      }
-      tr.insertText(replacedStr, startBetWeenIndex, to);
-    } else {
-      let replacedStr = text.replace(/\n\t/g, "\n");
-      if (startBetWeenIndex === pos + 1) {
-        const firstNewLineIndex = replacedStr.indexOf("\t");
-        if (firstNewLineIndex == 0) {
-          replacedStr = replacedStr.replace("\t", "");
-        }
-      }
-      tr.insertText(replacedStr, startBetWeenIndex, to);
-    }
-    return false;
-  });
-
-  return tr;
-};
-
-const getRenderContainer = (node: HTMLElement) => {
-  let container = node;
-  // 文本节点
-  if (container.nodeName === "#text") {
-    container = node.parentElement as HTMLElement;
-  }
-  while (
-    container &&
-    container.classList &&
-    !container.classList.contains("code-node")
-  ) {
-    container = container.parentElement as HTMLElement;
-  }
-  return container;
-};
-
-export default CodeBlockLowlight.extend<
-  CustomCodeBlockLowlightOptions & CodeBlockLowlightOptions
+export const ExtensionCodeBlock = TiptapCodeBlock.extend<
+  ExtensionOptions & Partial<ExtensionCodeBlockOptions>
 >({
-  addCommands() {
+  // It needs to have a higher priority than range-selection (100),
+  // otherwise the Mod-a shortcut key will be overridden.
+  // But it should be lower than paragraph (1000) to avoid Backspace issues.
+  priority: 101,
+
+  fakeSelection: true,
+
+  haloEditorIndentation: {
+    keyboard: "passthrough",
+  },
+
+  addHaloEditorMetadata() {
+    const languages = Array.isArray(this.options.languages)
+      ? this.options.languages.map(({ value }) => value)
+      : undefined;
+    const themes = Array.isArray(this.options.themes)
+      ? this.options.themes.map(({ value }) => value)
+      : undefined;
     return {
-      ...this.parent?.(),
-      codeIndent:
-        () =>
-        ({ tr, state, dispatch }: CommandProps) => {
-          const { selection } = state;
-          tr = tr.setSelection(selection);
-          tr = updateIndent(tr, "indent");
-          if (tr.docChanged && dispatch) {
-            dispatch(tr);
-            return true;
-          }
-          return false;
+      ai: {
+        description:
+          "A multi-line code block with optional language, syntax theme, and collapsed presentation.",
+        aliases: ["fenced code block"],
+        exposure: "recommended",
+        useWhen: [
+          "Presenting source code, configuration, terminal commands, or other preformatted text.",
+        ],
+        avoidWhen: ["The code fragment is short enough to remain inline."],
+        contentGuidelines: [
+          "Keep the code text verbatim and do not encode it as nested HTML.",
+          "Set the language when it is known so a highlighting extension can render it correctly.",
+        ],
+        attributeGuidance: {
+          language: {
+            description:
+              "Language identifier used for syntax highlighting and labeling.",
+            ...(languages?.length ? { allowedValues: languages } : {}),
+            examples: ["javascript", "java", "yaml", "bash"],
+            omitWhen: ["The language cannot be determined reliably."],
+          },
+          collapsed: {
+            description:
+              "Whether the editor initially displays the code block in a collapsed state.",
+            allowedValues: [true, false],
+            omitWhen: ["The code should be visible by default."],
+          },
+          theme: {
+            description:
+              "Syntax-highlighting theme identifier. Plugins may extend the available themes.",
+            ...(themes?.length ? { allowedValues: themes } : {}),
+            examples: ["github-dark", "github-light"],
+            omitWhen: ["The editor default theme should be used."],
+          },
         },
-      codeOutdent:
-        () =>
-        ({ tr, state, dispatch }: CommandProps) => {
-          const { selection } = state;
-          tr = tr.setSelection(selection);
-          tr = updateIndent(tr, "outdent");
-          if (tr.docChanged && dispatch) {
-            dispatch(tr);
-            return true;
-          }
-          return false;
+        generation: {
+          mode: "direct-html",
         },
+        examples: [
+          "<pre><code>Plain preformatted text</code></pre>",
+          '<pre><code class="language-javascript">const greeting = "Hello";</code></pre>',
+          '<pre theme="github-dark" collapsed="true"><code class="language-typescript">const enabled: boolean = true;</code></pre>',
+        ],
+      },
     };
   },
+
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      collapsed: {
+        default: false,
+        parseHTML: (element) => !!element.getAttribute("collapsed"),
+        renderHTML: (attributes) => {
+          if (attributes.collapsed) {
+            return {
+              collapsed: attributes.collapsed,
+            };
+          }
+          return {};
+        },
+      },
+      theme: {
+        default: this.options.defaultTheme,
+        parseHTML: (element) => element.getAttribute("theme") || null,
+        renderHTML: (attributes) => {
+          if (attributes.theme) {
+            return {
+              theme: attributes.theme,
+            };
+          }
+          return {};
+        },
+      },
+    };
+  },
+
   addKeyboardShortcuts() {
     return {
-      Tab: () => {
-        if (this.editor.isActive("codeBlock")) {
-          return this.editor.chain().focus().codeIndent().run();
+      ...this.parent?.(),
+      Backspace: ({ editor }) => {
+        if (!isNodeActive(editor.state, this.name)) {
+          return false;
         }
-        return false;
-      },
-      "Shift-Tab": () => {
-        if (this.editor.isActive("codeBlock")) {
-          return this.editor.chain().focus().codeOutdent().run();
+
+        const { selection } = editor.state;
+        // Clear the selected content and adapt to the all-select shortcut key operation.
+        if (!selection.empty) {
+          editor
+            .chain()
+            .focus()
+            .deleteSelection()
+            .setTextSelection(selection.$from.pos)
+            .run();
+          return true;
         }
+
+        const { $anchor } = selection;
+        const isAtStart = $anchor.parentOffset === 0;
+        // If the cursor is at the beginning of the code block or the code block is empty, it is not deleted.
+        if (isAtStart || !$anchor.parent.textContent.length) {
+          return true;
+        }
+
         return false;
       },
       "Mod-a": () => {
-        if (this.editor.isActive("codeBlock")) {
+        if (this.editor.isActive(TiptapCodeBlock.name)) {
           const { tr, selection } = this.editor.state;
           const codeBlack = findParentNode(
-            (node) => node.type.name === CodeBlockLowlight.name
+            (node) => node.type.name === TiptapCodeBlock.name
           )(selection);
           if (!codeBlack) {
             return false;
           }
           const head = codeBlack.start;
-          const anchor = codeBlack.start + codeBlack.node.nodeSize - 1;
+          const anchor = codeBlack.start + codeBlack.node.content.size;
+          if (selection.from === head && selection.to === anchor) {
+            return false;
+          }
           const $head = tr.doc.resolve(head);
           const $anchor = tr.doc.resolve(anchor);
           this.editor.view.dispatch(
@@ -167,44 +256,57 @@ export default CodeBlockLowlight.extend<
   addNodeView() {
     return VueNodeViewRenderer(CodeBlockViewRenderer);
   },
+
   addOptions() {
     return {
       ...this.parent?.(),
+      languages: [],
+      themes: [],
+      defaultLanguage: null,
+      defaultTheme: null,
+      enableTabIndentation: true,
+      tabSize: 2,
       getToolbarItems({ editor }: { editor: Editor }) {
         return {
           priority: 160,
           component: markRaw(ToolbarItem),
           props: {
             editor,
-            isActive: editor.isActive("codeBlock"),
-            icon: markRaw(MdiCodeBracesBox),
-            title: i18n.global.t("editor.common.codeblock"),
-            action: () => editor.chain().focus().toggleCodeBlock().run(),
+            isActive: editor.isActive(TiptapCodeBlock.name),
+            icon: markRaw(MingcuteBracesLine),
+            title: i18n.global.t("editor.common.codeblock.title"),
+            action: () => {
+              if (editor.isActive(TiptapCodeBlock.name)) {
+                editor.chain().focus().toggleCodeBlock().run();
+                return;
+              }
+              setCodeBlockWithIndent(editor);
+            },
           },
         };
       },
       getCommandMenuItems() {
         return {
           priority: 80,
-          icon: markRaw(MdiCodeBracesBox),
-          title: "editor.common.codeblock",
+          icon: markRaw(MingcuteBracesLine),
+          title: "editor.common.codeblock.title",
           keywords: ["codeblock", "daimakuai"],
           command: ({ editor, range }: { editor: Editor; range: Range }) => {
-            editor.chain().focus().deleteRange(range).setCodeBlock().run();
+            setCodeBlockWithIndent(editor, range);
           },
         };
       },
       getToolboxItems({ editor }: { editor: Editor }) {
         return [
           {
-            priority: 50,
+            priority: 60,
             component: markRaw(ToolboxItem),
             props: {
               editor,
-              icon: markRaw(MdiCodeBracesBox),
-              title: i18n.global.t("editor.common.codeblock"),
+              icon: markRaw(MingcuteBracesLine),
+              title: i18n.global.t("editor.common.codeblock.title"),
               action: () => {
-                editor.chain().focus().setCodeBlock().run();
+                setCodeBlockWithIndent(editor);
               },
             },
           },
@@ -212,33 +314,45 @@ export default CodeBlockLowlight.extend<
       },
       getBubbleMenu() {
         return {
-          pluginKey: "codeBlockBubbleMenu",
-          shouldShow: ({ state }: { state: EditorState }) => {
-            return isActive(state, CodeBlockLowlight.name);
+          pluginKey: CODE_BLOCK_BUBBLE_MENU_KEY,
+          shouldShow: ({ state }: { state: EditorState }): boolean => {
+            return isActive(state, TiptapCodeBlock.name);
           },
-          getRenderContainer: (node: HTMLElement) => {
-            return getRenderContainer(node);
+          options: {
+            placement: "top-start",
+          },
+          getReferencedVirtualElement() {
+            const editor = this.editor;
+            if (!editor) {
+              return null;
+            }
+            const parentNode = findParentNode(
+              (node) => node.type.name === ExtensionCodeBlock.name
+            )(editor.state.selection);
+            if (parentNode) {
+              const domRect = posToDOMRect(
+                editor.view,
+                parentNode.pos,
+                parentNode.pos + parentNode.node.nodeSize
+              );
+              return {
+                getBoundingClientRect: () => domRect,
+                getClientRects: () => [domRect],
+              };
+            }
+            return null;
           },
           items: [
             {
               priority: 10,
               props: {
-                icon: markRaw(MdiDeleteForeverOutline),
+                icon: markRaw(MingcuteDelete2Line),
                 title: i18n.global.t("editor.common.button.delete"),
                 action: ({ editor }: { editor: Editor }) =>
-                  deleteNode(CodeBlockLowlight.name, editor),
+                  deleteNode(TiptapCodeBlock.name, editor),
               },
             },
           ],
-        };
-      },
-      getDraggable() {
-        return {
-          getRenderContainer({ dom }: { dom: HTMLElement }) {
-            return {
-              el: getRenderContainer(dom),
-            };
-          },
         };
       },
     };

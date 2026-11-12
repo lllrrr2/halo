@@ -9,7 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.lang.NonNull;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -36,34 +35,29 @@ class SinglePageConversionServiceImplTest {
 
     @Test
     void extendPageContent() {
-        when(extensionGetter.getEnabledExtensionByDefinition(
-            eq(ReactiveSinglePageContentHandler.class)))
-            .thenReturn(
-                Flux.just(new PageContentHandlerB(),
-                    new PageContentHandlerA(),
-                    new PageContentHandlerC())
-            );
+        when(extensionGetter.getEnabledExtensions(eq(ReactiveSinglePageContentHandler.class)))
+                .thenReturn(Flux.just(new PageContentHandlerB(), new PageContentHandlerA(), new PageContentHandlerC()));
         ContentWrapper contentWrapper = ContentWrapper.builder()
-            .content("fake-content")
-            .raw("fake-raw")
-            .rawType("markdown")
-            .build();
+                .content("fake-content")
+                .raw("fake-raw")
+                .rawType("markdown")
+                .build();
         SinglePage singlePage = new SinglePage();
         singlePage.setMetadata(new Metadata());
         singlePage.getMetadata().setName("fake-page");
-        pageConversionService.extendPageContent(singlePage, contentWrapper)
-            .as(StepVerifier::create)
-            .consumeNextWith(contentVo -> {
-                assertThat(contentVo.getContent()).isEqualTo("fake-content-B-A-C");
-            })
-            .verifyComplete();
+        pageConversionService
+                .extendPageContent(singlePage, contentWrapper)
+                .as(StepVerifier::create)
+                .consumeNextWith(contentVo -> {
+                    assertThat(contentVo.getContent()).isEqualTo("fake-content-B-A-C");
+                })
+                .verifyComplete();
     }
 
     static class PageContentHandlerA implements ReactiveSinglePageContentHandler {
 
         @Override
-        public Mono<SinglePageContentContext> handle(
-            @NonNull SinglePageContentContext pageContent) {
+        public Mono<SinglePageContentContext> handle(SinglePageContentContext pageContent) {
             pageContent.setContent(pageContent.getContent() + "-A");
             return Mono.just(pageContent);
         }
@@ -72,8 +66,7 @@ class SinglePageConversionServiceImplTest {
     static class PageContentHandlerB implements ReactiveSinglePageContentHandler {
 
         @Override
-        public Mono<SinglePageContentContext> handle(
-            @NonNull SinglePageContentContext pageContent) {
+        public Mono<SinglePageContentContext> handle(SinglePageContentContext pageContent) {
             pageContent.setContent(pageContent.getContent() + "-B");
             return Mono.just(pageContent);
         }
@@ -82,8 +75,7 @@ class SinglePageConversionServiceImplTest {
     static class PageContentHandlerC implements ReactiveSinglePageContentHandler {
 
         @Override
-        public Mono<SinglePageContentContext> handle(
-            @NonNull SinglePageContentContext pageContent) {
+        public Mono<SinglePageContentContext> handle(SinglePageContentContext pageContent) {
             pageContent.setContent(pageContent.getContent() + "-C");
             return Mono.just(pageContent);
         }

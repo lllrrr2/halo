@@ -1,16 +1,18 @@
 {
-  "extends": "@tsconfig/node18/tsconfig.json",
+  "extends": "@tsconfig/node24/tsconfig.json",
   "include": [
-    "vite.config.*",
-    "vite.uc.config.ts",
+    "vite.config.ts",
     "vitest.config.*",
-    "cypress.config.*",
-    "src/vite/library-external.ts",
-    "src/vite/config-builder.ts"
+    "eslint.config.ts",
+    "tailwind.config.ts",
+    "src/vite/*.ts"
   ],
   "compilerOptions": {
     "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "module": "ESNext",
-    "types": ["node"]
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "allowImportingTsExtensions": true
   }
 }

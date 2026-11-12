@@ -1,38 +1,46 @@
 <script lang="ts" setup>
-import type { CategoryTree } from "@console/modules/contents/posts/categories/utils";
+import {
+  getCategoryFromNode,
+  type CategoryTreeNode,
+} from "@console/modules/contents/posts/categories/utils";
 import type { Category } from "@halo-dev/api-client";
 import { IconCheckboxCircle } from "@halo-dev/components";
-import { inject, ref, type Ref } from "vue";
+import { computed, inject, ref, type Ref } from "vue";
 
 withDefaults(
   defineProps<{
-    category: CategoryTree;
+    category: CategoryTreeNode;
   }>(),
   {}
 );
 
-const isSelected = inject<(category: CategoryTree) => boolean>("isSelected");
-const selectedCategory = inject<Ref<Category | CategoryTree | undefined>>(
+const isSelected =
+  inject<(category: CategoryTreeNode) => boolean>("isSelected");
+const selectedCategory = inject<Ref<Category | CategoryTreeNode | undefined>>(
   "selectedCategory",
   ref(undefined)
 );
+const selectedCategoryName = computed(() => {
+  return selectedCategory.value
+    ? getCategoryFromNode(selectedCategory.value).metadata.name
+    : undefined;
+});
 
 const emit = defineEmits<{
-  (event: "select", category: CategoryTree): void;
+  (event: "select", category: CategoryTreeNode): void;
 }>();
 
-const onSelect = (childCategory: CategoryTree) => {
+const onSelect = (childCategory: CategoryTreeNode) => {
   emit("select", childCategory);
 };
 </script>
 
 <template>
-  <li :id="`category-${category.metadata.name}`">
+  <li :id="`category-${category.category.metadata.name}`">
     <div
       class="flex cursor-pointer items-center justify-between rounded p-2 hover:bg-gray-100"
       :class="{
-        'bg-gray-100':
-          selectedCategory?.metadata.name === category.metadata.name,
+        'bg-gray-100': selectedCategoryName === category.category.metadata.name,
       }"
       @click="emit('select', category)"
     >
@@ -41,10 +49,10 @@ const onSelect = (childCategory: CategoryTree) => {
         :class="{
           'text-gray-900':
             isSelected?.(category) &&
-            selectedCategory?.metadata.name === category.metadata.name,
+            selectedCategoryName === category.category.metadata.name,
         }"
       >
-        {{ category.spec.displayName }}
+        {{ category.category.spec.displayName }}
       </span>
 
       <IconCheckboxCircle
@@ -54,12 +62,12 @@ const onSelect = (childCategory: CategoryTree) => {
     </div>
 
     <ul
-      v-if="category.spec.children.length > 0"
+      v-if="category.children.length > 0"
       class="my-2.5 ml-2.5 border-l pl-1.5"
     >
       <CategoryListItem
-        v-for="(childCategory, index) in category.spec.children"
-        :key="index"
+        v-for="childCategory in category.children"
+        :key="childCategory.category.metadata.name"
         :category="childCategory"
         @select="onSelect"
       />

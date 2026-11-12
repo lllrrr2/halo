@@ -1,44 +1,31 @@
 <script lang="ts" setup>
-// core libs
-import { nextTick, onMounted, type Ref, computed, watch } from "vue";
-import { provide, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
-
-// libs
-import { cloneDeep } from "lodash-es";
-
-// hooks
-import { useThemeLifeCycle } from "../composables/use-theme";
-// types
+import { useActivatedTheme } from "@console/composables/use-activated-theme";
 import BasicLayout from "@console/layouts/BasicLayout.vue";
-
-// components
+import type { Setting, Theme } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
   IconExchange,
   IconEye,
+  IconListSettings,
   IconPalette,
   VButton,
   VCard,
   VEmpty,
+  VLoading,
   VPageHeader,
   VSpace,
   VTabbar,
-  VLoading,
-  Dialog,
-  IconListSettings,
 } from "@halo-dev/components";
-import ThemeListModal from "../components/ThemeListModal.vue";
-import ThemePreviewModal from "../components/preview/ThemePreviewModal.vue";
-import type { Setting, SettingForm, Theme } from "@halo-dev/api-client";
-import { usePermission } from "@/utils/permission";
-import { useThemeStore } from "@console/stores/theme";
-import { storeToRefs } from "pinia";
-import { apiClient } from "@/utils/api-client";
-import { useI18n } from "vue-i18n";
+import { utils } from "@halo-dev/ui-shared";
 import { useQuery } from "@tanstack/vue-query";
-import { useRouteQuery } from "@vueuse/router";
+import { computed, provide, ref, watch, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { useRoute, useRouter } from "vue-router";
+import ThemePreviewModal from "../components/preview/ThemePreviewModal.vue";
+import ThemeListModal from "../components/ThemeListModal.vue";
+import { useInstalledThemes } from "../composables/use-installed-themes";
+import { useThemeLifeCycle } from "../composables/use-theme";
 
-const { currentUserHasPermission } = usePermission();
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
@@ -62,23 +49,59 @@ const initialTabs: ThemeTab[] = [
   },
 ];
 
-const tabs = ref<ThemeTab[]>(cloneDeep(initialTabs));
-const selectedTheme = ref<Theme>();
+const {
+  data: activatedTheme,
+  isInitialLoading: activeThemeLoading,
+  isError: activeThemeError,
+  refetch: refetchActiveTheme,
+} = useActivatedTheme();
+const hasThemeQuery = computed(() => route.query.theme !== undefined);
+const themeName = computed(() =>
+  typeof route.query.theme === "string" ? route.query.theme : undefined
+);
+const {
+  data: themes,
+  isInitialLoading: themesLoading,
+  isError: themesError,
+  refetch: refetchThemes,
+} = useInstalledThemes(computed(() => !!themeName.value));
+const selectedTheme = computed(() => {
+  if (!hasThemeQuery.value) {
+    return activatedTheme.value ?? undefined;
+  }
+  return themes.value?.find(
+    (theme) =>
+      theme.metadata.name === themeName.value &&
+      !theme.metadata.deletionTimestamp
+  );
+});
 const themesModal = ref(false);
+const themeListModal = ref<InstanceType<typeof ThemeListModal>>();
 const previewModal = ref(false);
-const activeTab = ref(tabs.value[0].id);
+const activeTab = computed(() =>
+  route.name === "ThemeSetting" ? String(route.params.group) : initialTabs[0].id
+);
 provide<Ref<string>>("activeTab", activeTab);
 provide<Ref<boolean>>("themesModal", themesModal);
 
-const { loading, isActivated, handleActiveTheme } =
+const { isActivated, isActivationKnown, handleActiveTheme } =
   useThemeLifeCycle(selectedTheme);
 
 provide<Ref<Theme | undefined>>("selectedTheme", selectedTheme);
 
-const { data: setting } = useQuery<Setting>({
-  queryKey: ["theme-setting", selectedTheme],
+const {
+  data: setting,
+  isInitialLoading: settingLoading,
+  isError: settingError,
+  refetch: refetchSetting,
+} = useQuery<Setting>({
+  queryKey: [
+    "theme-setting",
+    computed(() => selectedTheme.value?.metadata.name),
+    computed(() => selectedTheme.value?.spec.settingName),
+  ],
   queryFn: async () => {
-    const { data } = await apiClient.theme.fetchThemeSetting({
+    const { data } = await consoleApiClient.theme.theme.fetchThemeSetting({
       name: selectedTheme.value?.metadata.name as string,
     });
     return data;
@@ -87,150 +110,159 @@ const { data: setting } = useQuery<Setting>({
     return (
       !!selectedTheme.value &&
       !!selectedTheme.value.spec.settingName &&
-      currentUserHasPermission(["system:themes:view"])
+      utils.permission.has(["system:themes:view"])
     );
   }),
-  async onSuccess(data) {
-    if (data) {
-      const { forms } = data.spec;
-      tabs.value = [
-        ...initialTabs,
-        ...forms.map((item: SettingForm) => {
-          return {
-            id: item.group,
-            label: item.label || "",
-            route: {
-              name: "ThemeSetting",
-              params: {
-                group: item.group,
-              },
-            },
-          };
-        }),
-      ] as ThemeTab[];
-    }
-
-    await nextTick();
-
-    handleTriggerTabChange();
-  },
 });
+
+const tabs = computed<ThemeTab[]>(() => [
+  ...initialTabs,
+  ...(setting.value?.spec.forms || []).map((item) => ({
+    id: item.group,
+    label: item.label || "",
+    route: {
+      name: "ThemeSetting",
+      params: { group: item.group },
+    },
+  })),
+]);
 
 provide<Ref<Setting | undefined>>("setting", setting);
 
-const handleTabChange = (id: string) => {
+const handleTabChange = (id: string | number) => {
   const tab = tabs.value.find((item) => item.id === id);
   if (tab) {
-    activeTab.value = tab.id;
-    router.push(tab.route);
+    return router.push({ ...tab.route, query: route.query, hash: route.hash });
   }
 };
 
-const handleTriggerTabChange = () => {
-  if (route.name === "ThemeSetting") {
-    const tab = tabs.value.find((tab) => {
-      return (
-        tab.route.name === route.name &&
-        tab.route.params?.group === route.params.group
-      );
-    });
-    if (tab) {
-      activeTab.value = tab.id;
-      return;
-    }
-    handleTabChange(tabs.value[0].id);
+const onSelectTheme = async (theme: Theme | undefined) => {
+  if (!theme) return;
+  if (theme.metadata.name === selectedTheme.value?.metadata.name) {
+    themeListModal.value?.close();
     return;
   }
-
-  const tab = tabs.value.find((tab) => tab.route.name === route.name);
-  activeTab.value = tab ? tab.id : tabs.value[0].id;
-};
-
-const onSelectTheme = () => {
-  tabs.value = cloneDeep(initialTabs);
-  handleTabChange(tabs.value[0].id);
-};
-
-onMounted(() => {
-  const themeStore = useThemeStore();
-
-  const { activatedTheme } = storeToRefs(themeStore);
-
-  selectedTheme.value = activatedTheme?.value;
-});
-
-watch([() => route.name, () => route.params], async () => {
-  handleTriggerTabChange();
-});
-
-// handle remote download url from route
-const remoteDownloadUrl = useRouteQuery<string | null>("remote-download-url");
-onMounted(() => {
-  if (remoteDownloadUrl.value) {
-    Dialog.warning({
-      title: t("core.theme.operations.remote_download.title"),
-      description: t("core.theme.operations.remote_download.description", {
-        url: remoteDownloadUrl.value,
-      }),
-      confirmText: t("core.common.buttons.download"),
-      cancelText: t("core.common.buttons.cancel"),
-      onConfirm() {
-        themesModal.value = true;
-      },
-      onCancel() {
-        remoteDownloadUrl.value = null;
-      },
-    });
+  const failure = await router.replace({
+    name: "ThemeDetail",
+    query: { ...route.query, theme: theme.metadata.name },
+  });
+  if (!failure) {
+    themeListModal.value?.close();
   }
-});
+};
+
+// Wait for the selected theme's settings before validating a bookmarked group.
+watch(
+  [
+    () => route.name,
+    () => route.params.group,
+    selectedTheme,
+    tabs,
+    settingLoading,
+  ],
+  () => {
+    if (
+      route.name === "ThemeSetting" &&
+      selectedTheme.value &&
+      !settingLoading.value &&
+      !settingError.value &&
+      !tabs.value.some(
+        (tab) =>
+          tab.route.name === "ThemeSetting" &&
+          tab.route.params?.group === route.params.group
+      )
+    ) {
+      void router.replace({
+        name: "ThemeDetail",
+        query: route.query,
+        hash: route.hash,
+      });
+    }
+  },
+  { immediate: true }
+);
 </script>
 <template>
   <BasicLayout>
     <VPageHeader :title="selectedTheme?.spec.displayName">
       <template #icon>
-        <IconPalette class="mr-2 self-center" />
+        <IconPalette />
       </template>
       <template #actions>
-        <VSpace>
-          <VButton
-            v-show="!isActivated"
-            v-permission="['system:themes:manage']"
-            size="sm"
-            type="primary"
-            @click="handleActiveTheme()"
-          >
-            {{ $t("core.common.buttons.activate") }}
-          </VButton>
-          <VButton type="default" size="sm" @click="previewModal = true">
-            <template #icon>
-              <IconEye class="h-full w-full" />
-            </template>
-            {{ $t("core.common.buttons.preview") }}
-          </VButton>
-          <VButton type="secondary" @click="themesModal = true">
-            <template #icon>
-              <IconListSettings class="h-full w-full" />
-            </template>
-            {{ $t("core.theme.actions.management") }}
-          </VButton>
-        </VSpace>
+        <VButton
+          v-if="hasThemeQuery && activeThemeError"
+          @click="refetchActiveTheme()"
+          >{{ $t("core.common.buttons.retry") }}</VButton
+        >
+        <VButton
+          v-if="selectedTheme && isActivationKnown && !isActivated"
+          v-permission="['system:themes:manage']"
+          size="sm"
+          type="primary"
+          @click="handleActiveTheme(true)"
+        >
+          {{ $t("core.common.buttons.activate") }}
+        </VButton>
+        <VButton
+          v-if="selectedTheme"
+          type="default"
+          size="sm"
+          @click="previewModal = true"
+        >
+          <template #icon>
+            <IconEye />
+          </template>
+          {{ $t("core.common.buttons.preview") }}
+        </VButton>
+        <VButton type="secondary" @click="themesModal = true">
+          <template #icon>
+            <IconListSettings />
+          </template>
+          {{ $t("core.theme.actions.management") }}
+        </VButton>
       </template>
     </VPageHeader>
 
     <div class="m-0 md:m-4">
+      <VLoading
+        v-if="
+          (themeName && themesLoading) || (!hasThemeQuery && activeThemeLoading)
+        "
+      />
       <VEmpty
-        v-if="!selectedTheme && !loading"
+        v-else-if="
+          (themeName && themesError && !themes) ||
+          (!hasThemeQuery && activeThemeError && !activatedTheme)
+        "
+        :title="$t('core.common.status.loading_error')"
+      >
+        <template #actions>
+          <VButton
+            @click="hasThemeQuery ? refetchThemes() : refetchActiveTheme()"
+          >
+            {{ $t("core.common.buttons.retry") }}
+          </VButton>
+        </template>
+      </VEmpty>
+      <VEmpty
+        v-else-if="!selectedTheme"
         :message="$t('core.theme.empty.message')"
-        :title="$t('core.theme.empty.title')"
+        :title="
+          $t(
+            hasThemeQuery
+              ? 'core.common.toast.not_found'
+              : 'core.theme.empty.title'
+          )
+        "
       >
         <template #actions>
           <VSpace>
             <VButton @click="themesModal = true">
               {{ $t("core.theme.common.buttons.install") }}
             </VButton>
-            <VButton type="primary" @click="themesModal = true">
+            <VButton type="secondary" @click="themesModal = true">
               <template #icon>
-                <IconExchange class="h-full w-full" />
+                <IconExchange />
               </template>
               {{ $t("core.theme.empty.actions.switch") }}
             </VButton>
@@ -242,7 +274,7 @@ onMounted(() => {
         <VCard :body-class="['!p-0', '!overflow-visible']">
           <template #header>
             <VTabbar
-              v-model:active-id="activeTab"
+              :active-id="activeTab"
               :items="tabs.map((item) => ({ id: item.id, label: item.label }))"
               class="w-full !rounded-none"
               type="outline"
@@ -250,12 +282,26 @@ onMounted(() => {
             ></VTabbar>
           </template>
           <div class="rounded-b-base bg-white">
+            <VEmpty
+              v-if="settingError && !setting"
+              :title="$t('core.common.status.loading_error')"
+            >
+              <template #actions>
+                <VButton @click="refetchSetting()">{{
+                  $t("core.common.buttons.retry")
+                }}</VButton>
+              </template>
+            </VEmpty>
+            <VLoading v-if="route.name === 'ThemeSetting' && settingLoading" />
             <RouterView
-              :key="`${selectedTheme?.metadata.name}-${activeTab}`"
+              v-if="
+                route.name !== 'ThemeSetting' ||
+                (!settingLoading && !(settingError && !setting))
+              "
               v-slot="{ Component }"
             >
               <template v-if="Component">
-                <Suspense>
+                <Suspense :key="selectedTheme.metadata.name">
                   <component :is="Component"></component>
                   <template #fallback>
                     <VLoading />
@@ -268,7 +314,12 @@ onMounted(() => {
       </div>
     </div>
 
-    <ThemeListModal v-model:visible="themesModal" @select="onSelectTheme" />
+    <ThemeListModal
+      v-if="themesModal"
+      ref="themeListModal"
+      @close="themesModal = false"
+      @select="onSelectTheme"
+    />
     <ThemePreviewModal
       v-if="previewModal"
       :theme="selectedTheme"

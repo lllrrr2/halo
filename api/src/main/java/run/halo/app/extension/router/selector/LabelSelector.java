@@ -1,88 +1,103 @@
 package run.halo.app.extension.router.selector;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Predicate;
 import lombok.Data;
 import lombok.experimental.Accessors;
-import org.springframework.lang.NonNull;
-import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
+import run.halo.app.extension.index.query.Condition;
+import run.halo.app.extension.index.query.LabelCondition;
+import run.halo.app.extension.index.query.Queries;
 
 @Data
 @Accessors(chain = true)
-public class LabelSelector implements Predicate<Map<String, String>> {
-    private List<SelectorMatcher> matchers;
+public class LabelSelector {
+
+    private List<LabelCondition> conditions;
 
     @Override
-    public boolean test(@NonNull Map<String, String> labels) {
-        Assert.notNull(labels, "Labels must not be null");
-        if (matchers == null || matchers.isEmpty()) {
-            return true;
+    public String toString() {
+        if (CollectionUtils.isEmpty(conditions)) {
+            return Condition.empty().toString();
         }
-        return matchers.stream()
-            .allMatch(matcher -> matcher.test(labels.get(matcher.getKey())));
+        return conditions.stream()
+                .map(c -> (Condition) c)
+                .reduce(Condition::and)
+                .orElseGet(Condition::empty)
+                .toString();
     }
 
     /**
-     * Returns a new label selector that is the result of ANDing the current selector with the
-     * given selector.
+     * Returns a new label selector that is the result of ANDing the current selector with the given selector.
      *
      * @param other the selector to AND with
      * @return a new label selector
      */
     public LabelSelector and(LabelSelector other) {
         var labelSelector = new LabelSelector();
-        var matchers = new ArrayList<SelectorMatcher>();
-        matchers.addAll(this.matchers);
-        matchers.addAll(other.matchers);
-        labelSelector.setMatchers(matchers);
+        var newConditions = new ArrayList<LabelCondition>();
+        newConditions.addAll(this.conditions);
+        newConditions.addAll(other.conditions);
+        labelSelector.setConditions(newConditions);
         return labelSelector;
     }
 
-    public static LabelSelectorBuilder builder() {
-        return new LabelSelectorBuilder();
+    public static LabelSelectorBuilder<?> builder() {
+        return new LabelSelectorBuilder<>();
     }
 
-    public static class LabelSelectorBuilder {
-        private final List<SelectorMatcher> matchers = new ArrayList<>();
+    public static class LabelSelectorBuilder<T extends LabelSelectorBuilder<T>> {
+        private final List<LabelCondition> conditions = new ArrayList<>();
 
-        public LabelSelectorBuilder eq(String key, String value) {
-            matchers.add(EqualityMatcher.equal(key, value));
-            return this;
+        public LabelSelectorBuilder() {}
+
+        /** Create a new label selector builder with the given matchers. */
+        public LabelSelectorBuilder(List<LabelCondition> conditions) {
+            if (conditions != null) {
+                this.conditions.addAll(conditions);
+            }
         }
 
-        public LabelSelectorBuilder notEq(String key, String value) {
-            matchers.add(EqualityMatcher.notEqual(key, value));
-            return this;
+        @SuppressWarnings("unchecked")
+        private T self() {
+            return (T) this;
         }
 
-        public LabelSelectorBuilder in(String key, String... values) {
-            matchers.add(SetMatcher.in(key, values));
-            return this;
+        public T eq(String key, String value) {
+            conditions.add(Queries.labelEqual(key, value));
+            return self();
         }
 
-        public LabelSelectorBuilder notIn(String key, String... values) {
-            matchers.add(SetMatcher.notIn(key, values));
-            return this;
+        public T notEq(String key, String value) {
+            conditions.add(Queries.labelEqual(key, value).not());
+            return self();
         }
 
-        public LabelSelectorBuilder exists(String key) {
-            matchers.add(SetMatcher.exists(key));
-            return this;
+        public T in(String key, String... values) {
+            conditions.add(Queries.labelIn(key, Arrays.asList(values)));
+            return self();
         }
 
-        public LabelSelectorBuilder notExists(String key) {
-            matchers.add(SetMatcher.notExists(key));
-            return this;
+        public T notIn(String key, String... values) {
+            conditions.add(Queries.labelIn(key, Arrays.asList(values)).not());
+            return self();
         }
 
-        /**
-         * Build the label selector.
-         */
+        public T exists(String key) {
+            conditions.add(Queries.labelExists(key));
+            return self();
+        }
+
+        public T notExists(String key) {
+            conditions.add(Queries.labelExists(key).not());
+            return self();
+        }
+
+        /** Build the label selector. */
         public LabelSelector build() {
             var labelSelector = new LabelSelector();
-            labelSelector.setMatchers(matchers);
+            labelSelector.setConditions(conditions);
             return labelSelector;
         }
     }

@@ -1,9 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
-import { VButton } from "../index";
 import { mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { IconSettings } from "../../../icons/icons";
+import { VButton } from "../index";
 
 describe("Button", () => {
+  it("should handle a route without a router", async () => {
+    const onClick = vi.fn();
+    const button = mount(VButton, { props: { route: "/target", onClick } });
+    await button.trigger("click");
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("should navigate when a route is provided", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/target", component: { template: "<div />" } }],
+    });
+    const push = vi.spyOn(router, "push");
+    const button = mount(VButton, {
+      props: { route: "/target" },
+      global: { plugins: [router] },
+    });
+
+    await button.trigger("click");
+    expect(push).toHaveBeenCalledWith("/target");
+  });
+
   it("should render", () => {
     expect(mount(VButton).html()).contains("button");
     expect(mount(VButton).html()).toMatchSnapshot();
@@ -68,7 +91,7 @@ describe("Button", () => {
 
     // default: false
     const button = mount(VButton, {
-      emits: { click: onClick },
+      emits: { click: onClick() },
     });
 
     await button.trigger("click");

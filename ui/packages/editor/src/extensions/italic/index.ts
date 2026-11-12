@@ -1,13 +1,41 @@
-import type { Editor } from "@/tiptap/vue-3";
-import TiptapItalic from "@tiptap/extension-italic";
-import type { ItalicOptions } from "@tiptap/extension-italic";
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import MdiFormatItalic from "~icons/mdi/format-italic";
+import TiptapItalic, { type ItalicOptions } from "@tiptap/extension-italic";
 import { markRaw } from "vue";
+import MingcuteItalicLine from "~icons/mingcute/italic-line";
+import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import type { Editor } from "@/tiptap";
 import type { ExtensionOptions } from "@/types";
 
-const Italic = TiptapItalic.extend<ExtensionOptions & ItalicOptions>({
+export type ExtensionItalicOptions = ExtensionOptions & Partial<ItalicOptions>;
+
+export const ExtensionItalic = TiptapItalic.extend<ExtensionItalicOptions>({
+  addKeyboardShortcuts() {
+    return defineHaloKeyboardShortcuts(this, [
+      {
+        id: "editor.format.italic",
+        keys: ["Mod-i"],
+        label: () => i18n.global.t("editor.common.italic"),
+        category: "formatting",
+        priority: 20,
+      },
+    ]);
+  },
+
+  addHaloEditorMetadata() {
+    return {
+      ai: {
+        description: "Emphasis for inline text, usually rendered in italics.",
+        exposure: "recommended",
+        useWhen: ["Adding semantic emphasis or marking a title or term."],
+        generation: {
+          mode: "direct-html",
+        },
+        examples: ["<p>This point is <em>especially relevant</em>.</p>"],
+      },
+    };
+  },
+
   addOptions() {
     return {
       ...this.parent?.(),
@@ -17,9 +45,10 @@ const Italic = TiptapItalic.extend<ExtensionOptions & ItalicOptions>({
           component: markRaw(ToolbarItem),
           props: {
             editor,
-            isActive: editor.isActive("italic"),
-            icon: markRaw(MdiFormatItalic),
+            isActive: editor.isActive(TiptapItalic.name),
+            icon: markRaw(MingcuteItalicLine),
             title: i18n.global.t("editor.common.italic"),
+            shortcutId: "editor.format.italic",
             action: () => editor.chain().focus().toggleItalic().run(),
           },
         };
@@ -27,5 +56,3 @@ const Italic = TiptapItalic.extend<ExtensionOptions & ItalicOptions>({
     };
   },
 });
-
-export default Italic;

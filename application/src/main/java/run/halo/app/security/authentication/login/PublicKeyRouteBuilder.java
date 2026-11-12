@@ -6,6 +6,7 @@ import org.springdoc.core.fn.builders.apiresponse.Builder;
 import org.springdoc.webflux.core.fn.SpringdocRouteBuilder;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import run.halo.app.security.authentication.CryptoService;
 
 public class PublicKeyRouteBuilder {
 
@@ -22,25 +23,24 @@ public class PublicKeyRouteBuilder {
      */
     public RouterFunction<ServerResponse> build() {
         return SpringdocRouteBuilder.route()
-            .GET("/login/public-key", request -> cryptoService.readPublicKey()
-                    .flatMap(publicKey -> {
-                        var base64Format = Base64.getEncoder().encodeToString(publicKey);
-                        var response = new PublicKeyResponse();
-                        response.setBase64Format(base64Format);
-                        return ServerResponse.ok()
-                            .bodyValue(response);
-                    }),
-                builder -> builder.operationId("GetPublicKey")
-                    .description("Read public key for encrypting password.")
-                    .tag("Login")
-                    .response(Builder.responseBuilder()
-                        .implementation(PublicKeyResponse.class))).build();
+                .GET(
+                        "/login/public-key",
+                        request -> cryptoService.readPublicKey().flatMap(publicKey -> {
+                            var base64Format = Base64.getEncoder().encodeToString(publicKey);
+                            var response = new PublicKeyResponse();
+                            response.setBase64Format(base64Format);
+                            return ServerResponse.ok().bodyValue(response);
+                        }),
+                        builder -> builder.operationId("GetPublicKey")
+                                .description("Read public key for encrypting password.")
+                                .tag("Login")
+                                .response(Builder.responseBuilder().implementation(PublicKeyResponse.class)))
+                .build();
     }
 
     @Data
     public static class PublicKeyResponse {
 
         private String base64Format;
-
     }
 }

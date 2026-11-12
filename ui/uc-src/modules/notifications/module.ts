@@ -1,8 +1,7 @@
-import { definePlugin } from "@halo-dev/console-shared";
-import BasicLayout from "@uc/layouts/BasicLayout.vue";
 import { IconNotificationBadgeLine } from "@halo-dev/components";
+import { definePlugin } from "@halo-dev/ui-shared";
+import BasicLayout from "@uc/layouts/BasicLayout.vue";
 import { markRaw } from "vue";
-import Notifications from "./Notifications.vue";
 
 export default definePlugin({
   ucRoutes: [
@@ -13,6 +12,7 @@ export default definePlugin({
       meta: {
         title: "core.uc_notification.title",
         searchable: true,
+        hideFooter: true,
         menu: {
           name: "core.uc_sidebar.menu.items.notification",
           group: "dashboard",
@@ -25,7 +25,7 @@ export default definePlugin({
         {
           path: "",
           name: "Notifications",
-          component: Notifications,
+          component: () => import("./Notifications.vue"),
         },
       ],
     },

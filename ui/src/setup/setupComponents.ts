@@ -1,32 +1,38 @@
-import { defineAsyncComponent, type App } from "vue";
-import { VClosePopper, VLoading, VTooltip } from "@halo-dev/components";
-import { Dropdown } from "floating-vue";
-import "floating-vue/dist/style.css";
-// @ts-ignore
-import VueGridLayout from "vue-grid-layout";
+import type { FormKitLibrary } from "@formkit/core";
 import { defaultConfig, plugin as FormKit } from "@formkit/vue";
-import FormKitConfig from "@/formkit/formkit.config";
-import FilterDropdown from "@/components/filter/FilterDropdown.vue";
+import { vClosePopper, VLoading, vTooltip } from "@halo-dev/components";
+import { defineAsyncComponent, type App } from "vue";
+import VueGridLayout from "vue-grid-layout";
 import FilterCleanButton from "@/components/filter/FilterCleanButton.vue";
-import SearchInput from "@/components/input/SearchInput.vue";
+import FilterDropdown from "@/components/filter/FilterDropdown.vue";
 import AnnotationsForm from "@/components/form/AnnotationsForm.vue";
-import AttachmentFileTypeIcon from "@/components/icon/AttachmentFileTypeIcon.vue";
+import SearchInput from "@/components/input/SearchInput.vue";
 import HasPermission from "@/components/permission/HasPermission.vue";
+import FormKitConfig from "@/formkit/formkit.config";
+import { builtinFormKitInputs } from "@/formkit/inputs";
 
-export function setupComponents(app: App) {
+export interface SetupComponentsOptions {
+  formkitInputs?: FormKitLibrary;
+}
+
+export function setupComponents(
+  app: App,
+  options: SetupComponentsOptions = {}
+) {
   app.use(VueGridLayout);
   app.use(
     FormKit,
     defaultConfig({
       ...FormKitConfig,
+      inputs: {
+        ...options.formkitInputs,
+        ...builtinFormKitInputs,
+      },
     })
   );
 
-  app.directive("tooltip", VTooltip);
-  app.directive("close-popper", VClosePopper);
-  // @deprecated
-  // Will be removed in the future, please use the VDropdown component from @halo-dev/components.
-  app.component("FloatingDropdown", Dropdown);
+  app.directive("tooltip", vTooltip);
+  app.directive("close-popper", vClosePopper);
   app.component(
     "VCodemirror",
     defineAsyncComponent(() => import("@/components/codemirror/Codemirror.vue"))
@@ -37,7 +43,12 @@ export function setupComponents(app: App) {
   app.component("FilterCleanButton", FilterCleanButton);
   app.component("SearchInput", SearchInput);
   app.component("AnnotationsForm", AnnotationsForm);
-  app.component("AttachmentFileTypeIcon", AttachmentFileTypeIcon);
+  app.component(
+    "AttachmentFileTypeIcon",
+    defineAsyncComponent(
+      () => import("@/components/icon/AttachmentFileTypeIcon.vue")
+    )
+  );
   app.component("HasPermission", HasPermission);
   app.component(
     "UppyUpload",
@@ -46,4 +57,17 @@ export function setupComponents(app: App) {
       loadingComponent: VLoading,
     })
   );
+}
+
+declare module "vue" {
+  interface GlobalComponents {
+    VCodemirror: (typeof import("@/components/codemirror/Codemirror.vue"))["default"];
+    FilterDropdown: (typeof import("@/components/filter/FilterDropdown.vue"))["default"];
+    FilterCleanButton: (typeof import("@/components/filter/FilterCleanButton.vue"))["default"];
+    SearchInput: (typeof import("@/components/input/SearchInput.vue"))["default"];
+    AnnotationsForm: (typeof import("@/components/form/AnnotationsForm.vue"))["default"];
+    AttachmentFileTypeIcon: (typeof import("@/components/icon/AttachmentFileTypeIcon.vue"))["default"];
+    HasPermission: (typeof import("@/components/permission/HasPermission.vue"))["default"];
+    UppyUpload: (typeof import("@/components/upload/UppyUpload.vue"))["default"];
+  }
 }

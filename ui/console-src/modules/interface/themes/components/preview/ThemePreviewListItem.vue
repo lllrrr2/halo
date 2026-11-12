@@ -1,13 +1,13 @@
 <script lang="ts" setup>
-import LazyImage from "@/components/image/LazyImage.vue";
 import type { Theme } from "@halo-dev/api-client";
 import {
+  VDropdownItem,
   VEntity,
   VEntityField,
   VTag,
-  VDropdownItem,
 } from "@halo-dev/components";
-import { toRefs } from "vue";
+import { UseImage } from "@vueuse/components";
+import { computed, toRefs } from "vue";
 import { useThemeLifeCycle } from "../../composables/use-theme";
 
 const props = withDefaults(
@@ -26,23 +26,27 @@ const emit = defineEmits<{
 
 const { theme } = toRefs(props);
 
-const { isActivated, handleActiveTheme } = useThemeLifeCycle(theme);
+const previewImage = computed(
+  () => theme.value.status?.screenshot || theme.value.spec.logo
+);
+
+const { isActivated, isActivationKnown, handleActiveTheme } =
+  useThemeLifeCycle(theme);
 </script>
 
 <template>
   <VEntity :is-selected="isSelected">
     <template #start>
-      <VEntityField>
+      <VEntityField v-if="previewImage">
         <template #description>
-          <div class="w-32">
+          <div class="w-20">
             <div
               class="group aspect-h-3 aspect-w-4 block w-full overflow-hidden rounded border bg-gray-100"
             >
-              <LazyImage
-                :key="theme.metadata.name"
-                :src="theme.spec.logo"
+              <UseImage
+                :src="previewImage"
                 :alt="theme.spec.displayName"
-                classes="pointer-events-none object-cover group-hover:opacity-75"
+                class="pointer-events-none object-cover group-hover:opacity-75"
               >
                 <template #loading>
                   <div
@@ -62,7 +66,7 @@ const { isActivated, handleActiveTheme } = useThemeLifeCycle(theme);
                     </span>
                   </div>
                 </template>
-              </LazyImage>
+              </UseImage>
             </div>
           </div>
         </template>
@@ -80,7 +84,10 @@ const { isActivated, handleActiveTheme } = useThemeLifeCycle(theme);
     </template>
 
     <template #dropdownItems>
-      <VDropdownItem v-if="!isActivated" @click="handleActiveTheme()">
+      <VDropdownItem
+        v-if="isActivationKnown && !isActivated"
+        @click="handleActiveTheme(true)"
+      >
         {{ $t("core.common.buttons.activate") }}
       </VDropdownItem>
       <VDropdownItem @click="emit('open-settings')">

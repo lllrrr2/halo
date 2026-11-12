@@ -1,15 +1,15 @@
 <script lang="ts" setup>
+import type { DetailedUser } from "@halo-dev/api-client";
 import {
   IconInformation,
-  IconUserSettings,
   VDescription,
   VDescriptionItem,
+  VSpace,
   VTag,
 } from "@halo-dev/components";
-import type { DetailedUser } from "@halo-dev/api-client";
-import { rbacAnnotations } from "@/constants/annotations";
-import { formatDatetime } from "@/utils/date";
+import { utils } from "@halo-dev/ui-shared";
 import RiVerifiedBadgeLine from "~icons/ri/verified-badge-line";
+import { rbacAnnotations } from "@/constants/annotations";
 
 withDefaults(defineProps<{ user?: DetailedUser }>(), {
   user: undefined,
@@ -55,24 +55,23 @@ withDefaults(defineProps<{ user?: DetailedUser }>(), {
         :label="$t('core.user.detail.fields.roles')"
         class="!px-2"
       >
-        <VTag
-          v-for="(role, index) in user?.roles"
-          :key="index"
-          @click="
-            $router.push({
-              name: 'RoleDetail',
-              params: { name: role.metadata.name },
-            })
-          "
-        >
-          <template #leftIcon>
-            <IconUserSettings />
-          </template>
-          {{
-            role.metadata.annotations?.[rbacAnnotations.DISPLAY_NAME] ||
-            role.metadata.name
-          }}
-        </VTag>
+        <VSpace>
+          <VTag
+            v-for="role in user?.roles"
+            :key="role.metadata.name"
+            @click="
+              $router.push({
+                name: 'RoleDetail',
+                params: { name: role.metadata.name },
+              })
+            "
+          >
+            {{
+              role.metadata.annotations?.[rbacAnnotations.DISPLAY_NAME] ||
+              role.metadata.name
+            }}
+          </VTag>
+        </VSpace>
       </VDescriptionItem>
       <VDescriptionItem
         :label="$t('core.user.detail.fields.bio')"
@@ -81,7 +80,7 @@ withDefaults(defineProps<{ user?: DetailedUser }>(), {
       />
       <VDescriptionItem
         :label="$t('core.user.detail.fields.creation_time')"
-        :content="formatDatetime(user?.user.metadata?.creationTimestamp)"
+        :content="utils.date.format(user?.user.metadata?.creationTimestamp)"
         class="!px-2"
       />
     </VDescription>

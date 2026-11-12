@@ -1,34 +1,18 @@
 {
   "name": "@halo-dev/components",
-  "version": "2.15.0",
+  "version": "2.28.0",
   "description": "",
-  "files": [
-    "dist"
-  ],
-  "main": "./dist/halo-components.iife.js",
-  "module": "./dist/halo-components.es.js",
-  "unpkg": "./dist/halo-components.iife.js",
-  "jsdelivr": "./dist/halo-components.iife.js",
-  "types": "./dist/index.d.ts",
-  "scripts": {
-    "dev": "vite build --watch",
-    "build": "vite build",
-    "test:unit": "vitest --environment jsdom --run",
-    "test:unit:watch": "vitest --environment jsdom --watch",
-    "test:unit:ui": "vitest --environment jsdom --watch --ui",
-    "test:unit:coverage": "vitest run --environment jsdom --coverage",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json --composite false",
-    "lint": "eslint ./src --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
-    "prettier": "prettier --write './src/**/*.{vue,js,jsx,ts,tsx,css,scss,json,yml,yaml,html}'",
-    "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
-  },
   "keywords": [
+    "@halo-dev/components",
     "halo",
     "halo-components",
-    "halo-dev",
-    "@halo-dev/components"
+    "halo-dev"
   ],
+  "homepage": "https://github.com/halo-dev/halo/tree/main/ui/packages/components#readme",
+  "bugs": {
+    "url": "https://github.com/halo-dev/halo/issues"
+  },
+  "license": "MIT",
   "author": {
     "name": "@halo-dev",
     "url": "https://github.com/halo-dev"
@@ -38,40 +22,51 @@
     "url": "https://github.com/halo-dev/halo.git",
     "directory": "ui/packages/components"
   },
-  "bugs": {
-    "url": "https://github.com/halo-dev/halo/issues"
-  },
-  "homepage": "https://github.com/halo-dev/halo/tree/main/ui/packages/components#readme",
-  "license": "MIT",
-  "devDependencies": {
-    "@iconify-json/ri": "^1.1.15",
-    "@storybook/addon-essentials": "^7.6.3",
-    "@storybook/addon-interactions": "^7.6.3",
-    "@storybook/addon-links": "^7.6.3",
-    "@storybook/addon-styling": "^1.3.7",
-    "@storybook/blocks": "^7.6.3",
-    "@storybook/testing-library": "^0.0.14-next.2",
-    "@storybook/vue3": "^7.6.3",
-    "@storybook/vue3-vite": "^7.6.3",
-    "eslint-plugin-storybook": "^0.6.15",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "storybook": "^7.6.3",
-    "unplugin-icons": "^0.14.15",
-    "vite-plugin-dts": "^2.3.0"
-  },
-  "peerDependencies": {
-    "vue": "^3.4.19",
-    "vue-router": "^4.2.5"
-  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.iife.js",
+  "module": "./dist/index.es.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/index.iife.js",
+  "jsdelivr": "./dist/index.iife.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/halo-components.es.js"
+      "import": "./dist/index.es.js"
     },
     "./dist/style.css": "./dist/style.css"
   },
+  "scripts": {
+    "build": "vp build",
+    "build-storybook": "storybook build",
+    "dev": "vp build --watch",
+    "storybook": "storybook dev -p 6006",
+    "test:unit": "vp test --run",
+    "test:unit:coverage": "vp test run --coverage",
+    "test:unit:ui": "vp test --watch --ui",
+    "test:unit:watch": "vp test --watch",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json --composite false",
+    "prepublishOnly": "vp run build"
+  },
   "dependencies": {
-    "floating-vue": "2.0.0-beta.24"
+    "floating-vue": "^5.2.2"
+  },
+  "devDependencies": {
+    "@storybook/addon-docs": "^10.5.7",
+    "@storybook/addon-links": "^10.5.7",
+    "@storybook/testing-library": "^0.2.2",
+    "@storybook/vue3-vite": "^10.5.7",
+    "eslint-plugin-storybook": "10.5.7",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "storybook": "^10.6.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.x",
+    "vue-router": "~5.1.0"
   }
 }

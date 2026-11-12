@@ -10,27 +10,38 @@ import run.halo.app.extension.Metadata;
 import run.halo.app.extension.Ref;
 
 /**
- * Request parameter object for {@link Comment}.
+ * Request body for creating a {@link Comment}.
  *
  * @author guqing
  * @since 2.0.0
  */
+@Schema(description = "Comment creation payload for console comment APIs.")
 @Data
 public class CommentRequest {
 
-    @Schema(requiredMode = REQUIRED)
+    @Schema(description = "Reference to the subject being commented on.", requiredMode = REQUIRED)
     private Ref subjectRef;
 
+    /** Guest/email owner information. If omitted, Halo uses the current authenticated user. */
     private CommentEmailOwner owner;
 
-    @Schema(requiredMode = REQUIRED, minLength = 1)
+    @Schema(description = "Original comment text submitted by the editor.", requiredMode = REQUIRED, minLength = 1)
     private String raw;
 
-    @Schema(requiredMode = REQUIRED, minLength = 1)
+    @Schema(
+            description = "Rendered HTML content for the comment. Unsafe HTML is rejected.",
+            requiredMode = REQUIRED,
+            minLength = 1)
     private String content;
 
-    @Schema(defaultValue = "false")
+    @Schema(
+            description =
+                    "Whether to notify the owner of future replies. Only an explicit false disables notifications.",
+            defaultValue = "true")
     private Boolean allowNotification;
+
+    @Schema(description = "Whether the comment should be hidden from normal display.", defaultValue = "false")
+    private Boolean hidden;
 
     /**
      * Converts {@link CommentRequest} to {@link Comment}.
@@ -48,6 +59,7 @@ public class CommentRequest {
         spec.setRaw(raw);
         spec.setContent(content);
         spec.setAllowNotification(allowNotification);
+        spec.setHidden(hidden);
 
         if (owner != null) {
             spec.setOwner(owner.toCommentOwner());

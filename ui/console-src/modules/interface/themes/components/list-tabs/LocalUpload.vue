@@ -1,21 +1,20 @@
 <script lang="ts" setup>
-import AppDownloadAlert from "@/components/common/AppDownloadAlert.vue";
-import { Dialog, Toast } from "@halo-dev/components";
-import type { ErrorResponse } from "@uppy/core";
-import type { UppyFile } from "@uppy/core";
+import { invalidateThemeQueries } from "@console/composables/use-activated-theme";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { Dialog, Toast, VAlert } from "@halo-dev/components";
+import { useQueryClient } from "@tanstack/vue-query";
+import type { Ref } from "vue";
+import { inject, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import type {
+  UppyUploadErrorResponse,
+  UppyUploadFile,
+} from "@/components/upload/types";
 import { THEME_ALREADY_EXISTS_TYPE } from "../../constants";
 import type { ThemeInstallationErrorResponse } from "../../types";
-import { useQueryClient } from "@tanstack/vue-query";
-import { useI18n } from "vue-i18n";
-import { inject } from "vue";
-import type { Ref } from "vue";
-import { ref } from "vue";
-import { useThemeStore } from "@console/stores/theme";
-import { apiClient } from "@/utils/api-client";
 
 const { t } = useI18n();
 const queryClient = useQueryClient();
-const themeStore = useThemeStore();
 
 const activeTabId = inject<Ref<string>>("activeTabId", ref(""));
 
@@ -24,17 +23,19 @@ const endpoint = "/apis/api.console.halo.run/v1alpha1/themes/install";
 const onUploaded = () => {
   Toast.success(t("core.common.toast.install_success"));
 
-  queryClient.invalidateQueries({ queryKey: ["themes"] });
-  themeStore.fetchActivatedTheme();
+  void invalidateThemeQueries(queryClient);
 
   activeTabId.value = "installed";
 };
 
-const onError = (file: UppyFile, response: ErrorResponse) => {
-  const body = response.body as ThemeInstallationErrorResponse;
+const onError = (
+  file: UppyUploadFile | undefined,
+  response: UppyUploadErrorResponse | undefined
+) => {
+  const body = response?.body as ThemeInstallationErrorResponse | undefined;
 
-  if (body.type === THEME_ALREADY_EXISTS_TYPE) {
-    handleCatchExistsException(body, file.data as File);
+  if (body?.type === THEME_ALREADY_EXISTS_TYPE) {
+    handleCatchExistsException(body, file?.data as File | undefined);
   }
 };
 
@@ -54,15 +55,14 @@ const handleCatchExistsException = async (
         throw new Error("File is required");
       }
 
-      await apiClient.theme.upgradeTheme({
+      await consoleApiClient.theme.theme.upgradeTheme({
         name: error.themeName,
         file: file,
       });
 
       Toast.success(t("core.common.toast.upgrade_success"));
 
-      queryClient.invalidateQueries({ queryKey: ["themes"] });
-      themeStore.fetchActivatedTheme();
+      void invalidateThemeQueries(queryClient);
 
       activeTabId.value = "installed";
     },
@@ -72,7 +72,28 @@ const handleCatchExistsException = async (
 
 <template>
   <div class="pb-3">
-    <AppDownloadAlert />
+    <VAlert
+      type="warning"
+      :title="$t('core.common.text.warning')"
+      :closable="false"
+    >
+      <template #description>
+        <i18n-t
+          keypath="core.theme.list_modal.security_alert.description"
+          tag="p"
+        >
+          <template #url>
+            <a
+              href="https://www.halo.run/store/apps"
+              target="_blank"
+              class="underline-offset-2 hover:text-gray-900 hover:underline"
+            >
+              {{ $t("core.common.text.official_app_store") }}
+            </a>
+          </template>
+        </i18n-t>
+      </template>
+    </VAlert>
   </div>
   <UppyUpload
     :restrictions="{

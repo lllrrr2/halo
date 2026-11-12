@@ -1,18 +1,23 @@
 package run.halo.app.content.comment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import run.halo.app.content.TestPost;
+import run.halo.app.core.extension.content.Constant;
 import run.halo.app.core.extension.content.Post;
 import run.halo.app.extension.FakeExtension;
 import run.halo.app.extension.Metadata;
@@ -35,19 +40,33 @@ class PostCommentSubjectTest {
 
     @Test
     void get() {
-        when(client.fetch(eq(Post.class), any()))
-            .thenReturn(Mono.empty());
-        when(client.fetch(eq(Post.class), eq("fake-post")))
-            .thenReturn(Mono.just(TestPost.postV1()));
+        when(client.fetch(eq(Post.class), any())).thenReturn(Mono.empty());
+        when(client.fetch(eq(Post.class), eq("fake-post"))).thenReturn(Mono.just(TestPost.postV1()));
 
-        postCommentSubject.get("fake-post")
-            .as(StepVerifier::create)
-            .expectNext(TestPost.postV1())
-            .verifyComplete();
+        postCommentSubject
+                .get("fake-post")
+                .as(StepVerifier::create)
+                .expectNext(TestPost.postV1())
+                .verifyComplete();
 
-        postCommentSubject.get("fake-post2")
-            .as(StepVerifier::create)
-            .verifyComplete();
+        postCommentSubject.get("fake-post2").as(StepVerifier::create).verifyComplete();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"/archives/example?lang=zh", "https://example.test/archives/example?lang=zh"})
+    void subjectDisplayPreservesStoredPermalink(String permalink) {
+        var subject = new Post();
+        subject.setSpec(new Post.PostSpec());
+        subject.getSpec().setTitle("Subject");
+        subject.getStatusOrDefault().setPermalink(permalink);
+        when(client.fetch(Post.class, "subject")).thenReturn(Mono.just(subject));
+
+        postCommentSubject
+                .getSubjectDisplay("subject")
+                .as(StepVerifier::create)
+                .expectNext(new CommentSubject.SubjectDisplay("Subject", permalink, "文章"))
+                .verifyComplete();
     }
 
     @Test
@@ -63,5 +82,14 @@ class PostCommentSubjectTest {
         fakeExtension.getMetadata().setName("test");
         supports = postCommentSubject.supports(Ref.of(fakeExtension));
         assertThat(supports).isFalse();
+    }
+
+    @Test
+    void shouldSupportRefWithoutVersion() {
+        var ref = new Ref();
+        ref.setName("fake-post");
+        ref.setGroup(Constant.GROUP);
+        ref.setKind(Post.KIND);
+        assertTrue(postCommentSubject.supports(ref));
     }
 }

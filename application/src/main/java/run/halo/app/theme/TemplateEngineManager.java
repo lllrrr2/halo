@@ -1,14 +1,11 @@
 package run.halo.app.theme;
 
-import java.io.FileNotFoundException;
-import java.nio.file.Path;
-import lombok.NonNull;
+import org.pf4j.PluginManager;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.thymeleaf.ThymeleafProperties;
+import org.springframework.boot.thymeleaf.autoconfigure.ThymeleafProperties;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ConcurrentLruCache;
-import org.springframework.util.ResourceUtils;
-import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.dialect.IDialect;
 import org.thymeleaf.spring6.ISpringWebFluxTemplateEngine;
 import org.thymeleaf.spring6.dialect.SpringStandardDialect;
@@ -17,23 +14,26 @@ import org.thymeleaf.templateresolver.FileTemplateResolver;
 import org.thymeleaf.templateresolver.ITemplateResolver;
 import reactor.core.publisher.Mono;
 import run.halo.app.infra.ExternalUrlSupplier;
-import run.halo.app.infra.exception.NotFoundException;
-import run.halo.app.plugin.HaloPluginManager;
+import run.halo.app.infra.SystemVersionSupplier;
 import run.halo.app.theme.dialect.HaloProcessorDialect;
 import run.halo.app.theme.engine.HaloTemplateEngine;
+import run.halo.app.theme.engine.PageLayoutTemplateResolver;
 import run.halo.app.theme.engine.PluginClassloaderTemplateResolver;
 import run.halo.app.theme.message.ThemeMessageResolver;
 
 /**
- * <p>The {@link TemplateEngineManager} uses an {@link ConcurrentLruCache LRU cache} to manage
- * theme's {@link ISpringWebFluxTemplateEngine}.</p>
+ * The {@link TemplateEngineManager} uses an {@link ConcurrentLruCache LRU cache} to manage theme's
+ * {@link ISpringWebFluxTemplateEngine}.
+ *
  * <p>The default limit size of the {@link ConcurrentLruCache LRU cache} is
- * {@link TemplateEngineManager#CACHE_SIZE_LIMIT} to prevent unnecessary memory occupation.</p>
- * <p>If theme's {@link ISpringWebFluxTemplateEngine} already exists, it returns.</p>
- * <p>Otherwise, it checks whether the theme exists and creates the
- * {@link ISpringWebFluxTemplateEngine} into the LRU cache according to the {@link ThemeContext}
- * .</p>
- * <p>It is thread safe.</p>
+ * {@link TemplateEngineManager#CACHE_SIZE_LIMIT} to prevent unnecessary memory occupation.
+ *
+ * <p>If theme's {@link ISpringWebFluxTemplateEngine} already exists, it returns.
+ *
+ * <p>Otherwise, it checks whether the theme exists and creates the {@link ISpringWebFluxTemplateEngine} into the LRU
+ * cache according to the {@link ThemeContext} .
+ *
+ * <p>It is thread safe.
  *
  * @author johnniang
  * @author guqing
@@ -48,7 +48,7 @@ public class TemplateEngineManager {
 
     private final ExternalUrlSupplier externalUrlSupplier;
 
-    private final HaloPluginManager haloPluginManager;
+    private final PluginManager pluginManager;
 
     private final ObjectProvider<ITemplateResolver> templateResolvers;
 
@@ -56,48 +56,44 @@ public class TemplateEngineManager {
 
     private final ThemeResolver themeResolver;
 
-    public TemplateEngineManager(ThymeleafProperties thymeleafProperties,
-        ExternalUrlSupplier externalUrlSupplier,
-        HaloPluginManager haloPluginManager, ObjectProvider<ITemplateResolver> templateResolvers,
-        ObjectProvider<IDialect> dialects, ThemeResolver themeResolver) {
+    private final SystemVersionSupplier systemVersionSupplier;
+
+    private final ThemeLayoutCompatibilityChecker themeLayoutCompatibilityChecker;
+
+    private final ResourceLoader resourceLoader;
+
+    public TemplateEngineManager(
+            ThymeleafProperties thymeleafProperties,
+            ExternalUrlSupplier externalUrlSupplier,
+            PluginManager pluginManager,
+            ObjectProvider<ITemplateResolver> templateResolvers,
+            ObjectProvider<IDialect> dialects,
+            ThemeResolver themeResolver,
+            SystemVersionSupplier systemVersionSupplier,
+            ThemeLayoutCompatibilityChecker themeLayoutCompatibilityChecker,
+            ResourceLoader resourceLoader) {
         this.thymeleafProperties = thymeleafProperties;
         this.externalUrlSupplier = externalUrlSupplier;
-        this.haloPluginManager = haloPluginManager;
+        this.pluginManager = pluginManager;
         this.templateResolvers = templateResolvers;
         this.dialects = dialects;
         this.themeResolver = themeResolver;
+        this.systemVersionSupplier = systemVersionSupplier;
+        this.themeLayoutCompatibilityChecker = themeLayoutCompatibilityChecker;
+        this.resourceLoader = resourceLoader;
         engineCache = new ConcurrentLruCache<>(CACHE_SIZE_LIMIT, this::templateEngineGenerator);
     }
 
     public ISpringWebFluxTemplateEngine getTemplateEngine(ThemeContext theme) {
         CacheKey cacheKey = buildCacheKey(theme);
-        // cache not exists, will create new engine
-        if (!engineCache.contains(cacheKey)) {
-            // before this, check if theme exists
-            if (!fileExists(theme.getPath())) {
-                throw new NotFoundException("Theme not found.");
-            }
-        }
         return engineCache.get(cacheKey);
     }
 
-    private boolean fileExists(Path path) {
-        try {
-            return ResourceUtils.getFile(path.toUri()).exists();
-        } catch (FileNotFoundException e) {
-            return false;
-        }
-    }
-
     public Mono<Void> clearCache(String themeName) {
-        return themeResolver.getThemeContext(themeName)
-            .doOnNext(themeContext -> {
-                CacheKey cacheKey = buildCacheKey(themeContext);
-                TemplateEngine templateEngine =
-                    (TemplateEngine) engineCache.get(cacheKey);
-                templateEngine.clearTemplateCache();
-            })
-            .then();
+        return themeResolver
+                .getThemeContext(themeName)
+                .doOnNext(themeContext -> engineCache.remove(buildCacheKey(themeContext)))
+                .then();
     }
 
     /**
@@ -107,8 +103,7 @@ public class TemplateEngineManager {
      * @param active from {@link #context}
      * @param context must not be null
      */
-    private record CacheKey(String name, boolean active, ThemeContext context) {
-    }
+    private record CacheKey(String name, boolean active, ThemeContext context) {}
 
     CacheKey buildCacheKey(ThemeContext context) {
         return new CacheKey(context.getName(), context.isActive(), context);
@@ -116,15 +111,23 @@ public class TemplateEngineManager {
 
     private ISpringWebFluxTemplateEngine templateEngineGenerator(CacheKey cacheKey) {
 
-        var engine = new HaloTemplateEngine(new ThemeMessageResolver(cacheKey.context()));
+        var engine = new HaloTemplateEngine(new ThemeMessageResolver(
+                cacheKey.context(),
+                resourceLoader,
+                thymeleafProperties.getPrefix(),
+                thymeleafProperties.getSuffix(),
+                thymeleafProperties.getEncoding() == null
+                        ? null
+                        : thymeleafProperties.getEncoding().name()));
         engine.setEnableSpringELCompiler(thymeleafProperties.isEnableSpringElCompiler());
         engine.setLinkBuilder(new ThemeLinkBuilder(cacheKey.context(), externalUrlSupplier));
-        engine.setRenderHiddenMarkersBeforeCheckboxes(
-            thymeleafProperties.isRenderHiddenMarkersBeforeCheckboxes());
+        engine.setRenderHiddenMarkersBeforeCheckboxes(thymeleafProperties.isRenderHiddenMarkersBeforeCheckboxes());
 
         var mainResolver = haloTemplateResolver();
         mainResolver.setPrefix(cacheKey.context().getPath().resolve("templates") + "/");
         engine.addTemplateResolver(mainResolver);
+        var pageLayoutTemplateResolver = createPageLayoutTemplateResolver(cacheKey.context());
+        engine.addTemplateResolver(pageLayoutTemplateResolver);
         var pluginTemplateResolver = createPluginClassloaderTemplateResolver();
         engine.addTemplateResolver(pluginTemplateResolver);
         // replace StandardDialect with SpringStandardDialect
@@ -134,23 +137,42 @@ public class TemplateEngineManager {
                 return ReactiveSpelVariableExpressionEvaluator.INSTANCE;
             }
         });
-        engine.addDialect(new HaloProcessorDialect());
+        engine.addDialect(new HaloProcessorDialect(systemVersionSupplier));
 
         templateResolvers.orderedStream().forEach(engine::addTemplateResolver);
+
+        // we collect all template resolvers and add them into composite template resolver
+        // to control the resolution flow
+        var compositeTemplateResolver = new CompositeTemplateResolver(engine.getTemplateResolvers());
+        engine.setTemplateResolver(compositeTemplateResolver);
+
         dialects.orderedStream().forEach(engine::addDialect);
 
         return engine;
     }
 
-    @NonNull
+    private PageLayoutTemplateResolver createPageLayoutTemplateResolver(ThemeContext themeContext) {
+        var resolver = new PageLayoutTemplateResolver(
+                themeContext.getPath(), themeLayoutCompatibilityChecker.isSupported(themeContext.getPath()));
+        resolver.setPrefix(thymeleafProperties.getPrefix());
+        resolver.setSuffix(thymeleafProperties.getSuffix());
+        resolver.setTemplateMode(thymeleafProperties.getMode());
+        resolver.setOrder(0);
+        if (thymeleafProperties.getEncoding() != null) {
+            resolver.setCharacterEncoding(thymeleafProperties.getEncoding().name());
+        }
+        return resolver;
+    }
+
     private PluginClassloaderTemplateResolver createPluginClassloaderTemplateResolver() {
-        var pluginTemplateResolver = new PluginClassloaderTemplateResolver(haloPluginManager);
+        var pluginTemplateResolver = new PluginClassloaderTemplateResolver(pluginManager);
         pluginTemplateResolver.setPrefix(thymeleafProperties.getPrefix());
         pluginTemplateResolver.setSuffix(thymeleafProperties.getSuffix());
         pluginTemplateResolver.setTemplateMode(thymeleafProperties.getMode());
         pluginTemplateResolver.setOrder(1);
         if (thymeleafProperties.getEncoding() != null) {
-            pluginTemplateResolver.setCharacterEncoding(thymeleafProperties.getEncoding().name());
+            pluginTemplateResolver.setCharacterEncoding(
+                    thymeleafProperties.getEncoding().name());
         }
         return pluginTemplateResolver;
     }

@@ -1,7 +1,6 @@
 <script lang="ts" setup>
-import { apiClient } from "@/utils/api-client";
-import { formatDatetime, relativeTimeTo } from "@/utils/date";
 import type { PersonalAccessToken } from "@halo-dev/api-client";
+import { ucApiClient } from "@halo-dev/api-client";
 import {
   Dialog,
   Toast,
@@ -10,7 +9,9 @@ import {
   VEntity,
   VEntityField,
   VStatusDot,
+  type StatusDotState,
 } from "@halo-dev/components";
+import { utils } from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
@@ -29,8 +30,11 @@ function handleDelete() {
   Dialog.warning({
     title: t("core.uc_profile.pat.operations.delete.title"),
     description: t("core.uc_profile.pat.operations.delete.description"),
+    confirmType: "danger",
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
     async onConfirm() {
-      await apiClient.pat.deletePat({
+      await ucApiClient.security.personalAccessToken.deletePat({
         name: props.token.metadata.name,
       });
 
@@ -44,8 +48,11 @@ function handleRevoke() {
   Dialog.warning({
     title: t("core.uc_profile.pat.operations.revoke.title"),
     description: t("core.uc_profile.pat.operations.revoke.description"),
+    confirmType: "danger",
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
     async onConfirm() {
-      await apiClient.pat.revokePat({
+      await ucApiClient.security.personalAccessToken.revokePat({
         name: props.token.metadata.name,
       });
 
@@ -56,7 +63,9 @@ function handleRevoke() {
 }
 
 async function handleRestore() {
-  await apiClient.pat.restorePat({ name: props.token.metadata.name });
+  await ucApiClient.security.personalAccessToken.restorePat({
+    name: props.token.metadata.name,
+  });
 
   Toast.success(t("core.uc_profile.pat.operations.restore.toast_success"));
   queryClient.invalidateQueries({ queryKey: ["personal-access-tokens"] });
@@ -74,12 +83,22 @@ const statusText = computed(() => {
   );
 });
 
-const statusTheme = computed(() => {
+const statusTheme = computed<StatusDotState>(() => {
   const { expiresAt } = props.token.spec || {};
   if (expiresAt && new Date(expiresAt) < new Date()) {
     return "warning";
   }
   return props.token.spec?.revoked ? "default" : "success";
+});
+
+const lastUsedDescription = computed(() => {
+  const lastUsed = props.token.spec?.lastUsed;
+  if (!lastUsed) {
+    return t("core.uc_profile.pat.list.fields.lastUsed.never");
+  }
+  return t("core.uc_profile.pat.list.fields.lastUsed.dynamic", {
+    lastUsed: utils.date.timeAgo(lastUsed),
+  });
 });
 </script>
 
@@ -106,11 +125,11 @@ const statusTheme = computed(() => {
           <div class="truncate text-xs tabular-nums text-gray-500">
             <span
               v-if="token.spec?.expiresAt"
-              v-tooltip="formatDatetime(token.spec.expiresAt)"
+              v-tooltip="utils.date.format(token.spec.expiresAt)"
             >
               {{
                 $t("core.uc_profile.pat.list.fields.expiresAt.dynamic", {
-                  expiresAt: relativeTimeTo(token.spec?.expiresAt),
+                  expiresAt: utils.date.timeAgo(token.spec?.expiresAt),
                 })
               }}
             </span>
@@ -126,7 +145,21 @@ const statusTheme = computed(() => {
         </template>
       </VEntityField>
       <VEntityField
-        :description="formatDatetime(token.metadata.creationTimestamp)"
+        v-tooltip="{
+          content: utils.date.format(token.spec?.lastUsed),
+          disabled: !token.spec?.lastUsed,
+        }"
+        :description="lastUsedDescription"
+      ></VEntityField>
+      <VEntityField
+        v-tooltip="
+          $t('core.uc_profile.pat.list.fields.creationTimestamp.tooltip', {
+            creationTimestamp: utils.date.format(
+              token.metadata.creationTimestamp
+            ),
+          })
+        "
+        :description="utils.date.timeAgo(token.metadata.creationTimestamp)"
       ></VEntityField>
     </template>
     <template #dropdownItems>

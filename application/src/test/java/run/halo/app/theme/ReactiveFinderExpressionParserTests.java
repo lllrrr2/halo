@@ -3,6 +3,7 @@ package run.halo.app.theme;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 import org.thymeleaf.IEngineConfiguration;
 import org.thymeleaf.TemplateEngine;
@@ -26,16 +28,16 @@ import org.thymeleaf.templateresource.ITemplateResource;
 import org.thymeleaf.templateresource.StringTemplateResource;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.infra.utils.JsonUtils;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 import run.halo.app.theme.dialect.HaloProcessorDialect;
 
 /**
  * Tests expression parser for reactive return value.
  *
  * @author guqing
- * @see ReactivePropertyAccessor
  * @see ReactiveSpelVariableExpressionEvaluator
  * @since 2.0.0
  */
@@ -45,7 +47,10 @@ public class ReactiveFinderExpressionParserTests {
     private ApplicationContext applicationContext;
 
     @Mock
-    private SystemConfigurableEnvironmentFetcher environmentFetcher;
+    private ObjectProvider<ExtensionGetter> extensionGetterProvider;
+
+    @Mock
+    private SystemConfigFetcher environmentFetcher;
 
     private TemplateEngine templateEngine;
 
@@ -60,10 +65,12 @@ public class ReactiveFinderExpressionParserTests {
             }
         }));
         templateEngine.addTemplateResolver(new TestTemplateResolver());
-        lenient().when(applicationContext.getBean(eq(SystemConfigurableEnvironmentFetcher.class)))
-            .thenReturn(environmentFetcher);
-        lenient().when(environmentFetcher.fetchComment())
-            .thenReturn(Mono.just(new SystemSetting.Comment()));
+        lenient()
+                .when(applicationContext.getBean(eq(SystemConfigFetcher.class)))
+                .thenReturn(environmentFetcher);
+        when(applicationContext.getBeanProvider(ExtensionGetter.class)).thenReturn(extensionGetterProvider);
+        when(extensionGetterProvider.getIfUnique()).thenReturn(null);
+        lenient().when(environmentFetcher.fetchComment()).thenReturn(Mono.just(new SystemSetting.Comment()));
     }
 
     @Test
@@ -101,9 +108,7 @@ public class ReactiveFinderExpressionParserTests {
         }
 
         public Flux<TestUser> users() {
-            return Flux.just(
-                new TestUser("guqing"), new TestUser("ruibaby"), new TestUser("johnniang")
-            );
+            return Flux.just(new TestUser("guqing"), new TestUser("ruibaby"), new TestUser("johnniang"));
         }
 
         public Flux<JsonNode> objectJsonNodeFlux() {
@@ -123,22 +128,23 @@ public class ReactiveFinderExpressionParserTests {
         }
     }
 
-    record TestUser(String name) {
-    }
+    record TestUser(String name) {}
 
     private Context getContext() {
         Context context = new Context();
         context.setVariable(
-            ThymeleafEvaluationContext.THYMELEAF_EVALUATION_CONTEXT_CONTEXT_VARIABLE_NAME,
-            new ThymeleafEvaluationContext(applicationContext, null));
+                ThymeleafEvaluationContext.THYMELEAF_EVALUATION_CONTEXT_CONTEXT_VARIABLE_NAME,
+                new ThymeleafEvaluationContext(applicationContext, null));
         return context;
     }
 
     static class TestTemplateResolver extends StringTemplateResolver {
         @Override
-        protected ITemplateResource computeTemplateResource(IEngineConfiguration configuration,
-            String ownerTemplate, String template,
-            Map<String, Object> templateResolutionAttributes) {
+        protected ITemplateResource computeTemplateResource(
+                IEngineConfiguration configuration,
+                String ownerTemplate,
+                String template,
+                Map<String, Object> templateResolutionAttributes) {
             return new StringTemplateResource("""
                 <p th:text="${genericMap.key}"></p>
                 <p th:text="${target.users[1].name}"></p>
@@ -155,8 +161,7 @@ public class ReactiveFinderExpressionParserTests {
                     var mapMono = /*[[${target.mapMono.foo}]]*/;
                     var arrayNodeMono = /*[[${target.arrayNodeMono.get(0).foo}]]*/;
                 </script>
-                 """);
+                """);
         }
-
     }
 }

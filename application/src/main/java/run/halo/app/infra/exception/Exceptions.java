@@ -8,14 +8,17 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.context.MessageSource;
 import org.springframework.core.annotation.MergedAnnotations;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
-import org.springframework.lang.Nullable;
+import org.springframework.http.ProblemDetail;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
 @Slf4j
@@ -24,51 +27,91 @@ public enum Exceptions {
 
     public static final String DEFAULT_TYPE = "about:blank";
 
-    public static final String THEME_ALREADY_EXISTS_TYPE =
-        "https://halo.run/probs/theme-alreay-exists";
+    public static final String THEME_ALREADY_EXISTS_TYPE = "https://halo.run/probs/theme-alreay-exists";
 
-    public static final String INVALID_CREDENTIAL_TYPE =
-        "https://halo.run/probs/invalid-credential";
+    public static final String INVALID_CREDENTIAL_TYPE = "https://halo.run/probs/invalid-credential";
 
-    public static final String REQUEST_NOT_PERMITTED_TYPE =
-        "https://halo.run/probs/request-not-permitted";
+    public static final String REQUEST_NOT_PERMITTED_TYPE = "https://halo.run/probs/request-not-permitted";
 
-    /**
-     * Non-ErrorResponse exception to type map.
-     */
+    public static final String CONFLICT_TYPE = "https://halo.run/probs/conflict";
+
+    public static final String SUDO_REQUIRED_TYPE = "https://halo.run/probs/sudo-required";
+
+    /** Non-ErrorResponse exception to type map. */
     public static final Map<Class<? extends Throwable>, String> EXCEPTION_TYPE_MAP = Map.of(
-        RequestNotPermitted.class, REQUEST_NOT_PERMITTED_TYPE,
-        BadCredentialsException.class, INVALID_CREDENTIAL_TYPE
-    );
+            RequestNotPermitted.class, REQUEST_NOT_PERMITTED_TYPE,
+            BadCredentialsException.class, INVALID_CREDENTIAL_TYPE);
 
-    public static ErrorResponse createErrorResponse(Throwable t, @Nullable HttpStatusCode status,
-        ServerWebExchange exchange, MessageSource messageSource) {
+    public static ErrorResponse createErrorResponse(
+            Throwable t, @Nullable HttpStatusCode status, ServerWebExchange exchange, MessageSource messageSource) {
         final ErrorResponse errorResponse;
         if (t instanceof ErrorResponse er) {
             errorResponse = er;
         } else {
-            var responseStatusAnno =
-                MergedAnnotations.from(t.getClass(), TYPE_HIERARCHY).get(ResponseStatus.class);
-            if (status == null) {
-                status = responseStatusAnno.getValue("code", HttpStatus.class)
-                    .orElse(HttpStatus.INTERNAL_SERVER_ERROR);
+            var er = handleConflictException(t);
+            if (er == null) {
+                er = handleException(t, status);
             }
-            var type = EXCEPTION_TYPE_MAP.getOrDefault(t.getClass(), DEFAULT_TYPE);
-            var detail = responseStatusAnno.getValue("reason", String.class)
-                .orElseGet(t::getMessage);
-            var builder = ErrorResponse.builder(t, status, detail)
-                .type(URI.create(type));
-            if (status.is5xxServerError()) {
-                builder.detailMessageCode("problemDetail.internalServerError")
-                    .titleMessageCode("problemDetail.title.internalServerError");
-            }
-            errorResponse = builder.build();
+            errorResponse = er;
         }
-        var problemDetail = errorResponse.updateAndGetBody(messageSource, getLocale(exchange));
+        var locale = getLocale(exchange);
+        var problemDetail = errorResponse.updateAndGetBody(messageSource, locale);
+        // Since Spring Framework 7.0.10 a custom reason takes precedence over the detail message code
+        // (see https://github.com/spring-projects/spring-framework/issues/36984). Halo uses the reason
+        // as an English fallback and relies on the message code for localization, so resolve the
+        // localized detail explicitly to keep error responses translated.
+        resolveLocalizedDetail(errorResponse, messageSource, locale);
         problemDetail.setInstance(exchange.getRequest().getURI());
         problemDetail.setProperty("requestId", exchange.getRequest().getId());
         problemDetail.setProperty("timestamp", Instant.now());
         return errorResponse;
+    }
+
+    private static void resolveLocalizedDetail(
+            ErrorResponse errorResponse, MessageSource messageSource, Locale locale) {
+        var detailCode = errorResponse.getDetailMessageCode();
+        var detail = detailCode == null
+                ? null
+                : messageSource.getMessage(
+                        detailCode, errorResponse.getDetailMessageArguments(messageSource, locale), null, locale);
+        if (detail == null && errorResponse instanceof ResponseStatusException statusException) {
+            // The reason may be a message code as well, consistent with ResponseStatusExceptionResolver.
+            var reason = statusException.getReason();
+            if (reason != null) {
+                detail = messageSource.getMessage(
+                        reason, statusException.getDetailMessageArguments(messageSource, locale), null, locale);
+            }
+        }
+        if (detail != null) {
+            errorResponse.getBody().setDetail(detail);
+        }
+    }
+
+    private static ErrorResponse handleException(Throwable t, @Nullable HttpStatusCode status) {
+        var responseStatusAnno =
+                MergedAnnotations.from(t.getClass(), TYPE_HIERARCHY).get(ResponseStatus.class);
+        if (status == null) {
+            status = responseStatusAnno.getValue("code", HttpStatus.class).orElse(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+        var type = EXCEPTION_TYPE_MAP.getOrDefault(t.getClass(), DEFAULT_TYPE);
+        var detail = responseStatusAnno.getValue("reason", String.class).orElseGet(t::getMessage);
+        var builder = ErrorResponse.builder(t, status, detail).type(URI.create(type));
+        if (status.is5xxServerError()) {
+            builder.detailMessageCode("problemDetail.internalServerError")
+                    .titleMessageCode("problemDetail.title.internalServerError");
+        }
+        return builder.build();
+    }
+
+    private static @Nullable ErrorResponse handleConflictException(Throwable t) {
+        if (t instanceof ConcurrencyFailureException) {
+            return ErrorResponse.builder(t, ProblemDetail.forStatus(HttpStatus.CONFLICT))
+                    .type(URI.create(CONFLICT_TYPE))
+                    .titleMessageCode("problemDetail.title.conflict")
+                    .detailMessageCode("problemDetail.conflict")
+                    .build();
+        }
+        return null;
     }
 
     public static Locale getLocale(ServerWebExchange exchange) {

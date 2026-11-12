@@ -1,27 +1,29 @@
 <script lang="ts" setup>
+import PostTag from "@console/modules/contents/posts/tags/components/PostTag.vue";
+import type { ListedPost } from "@halo-dev/api-client";
+import { GetThumbnailByUriSizeEnum, ucApiClient } from "@halo-dev/api-client";
 import {
   Dialog,
   IconExternalLinkLine,
   IconEye,
   IconEyeOff,
+  IconTimerLine,
   Toast,
-  VAvatar,
+  VDropdownDivider,
   VDropdownItem,
   VEntity,
   VEntityField,
   VSpace,
   VStatusDot,
 } from "@halo-dev/components";
-import type { ListedPost } from "@halo-dev/api-client";
-import { computed } from "vue";
-import { postLabels } from "@/constants/labels";
-import PostTag from "@console/modules/contents/posts/tags/components/PostTag.vue";
-import { formatDatetime } from "@/utils/date";
-import StatusDotField from "@/components/entity-fields/StatusDotField.vue";
-import { useI18n } from "vue-i18n";
-import HasPermission from "@/components/permission/HasPermission.vue";
-import { apiClient } from "@/utils/api-client";
+import { utils } from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import StatusDotField from "@/components/entity-fields/StatusDotField.vue";
+import PostContributorList from "@/components/user/PostContributorList.vue";
+import { postLabels } from "@/constants/labels";
+import { usePostPublishMutate } from "../composables/use-post-publish-mutate";
 
 const { t } = useI18n();
 const queryClient = useQueryClient();
@@ -48,21 +50,34 @@ const publishStatus = computed(() => {
     : t("core.post.filters.status.items.draft");
 });
 
+const isPublished = computed(() => {
+  const {
+    [postLabels.PUBLISHED]: published,
+    [postLabels.SCHEDULING_PUBLISH]: schedulingPublish,
+  } = props.post.post.metadata.labels || {};
+  return published !== "true" && schedulingPublish !== "true";
+});
+
 const isPublishing = computed(() => {
-  const { spec, status, metadata } = props.post.post;
+  const { spec, metadata } = props.post.post;
   return (
-    (spec.publish && metadata.labels?.[postLabels.PUBLISHED] !== "true") ||
-    (spec.releaseSnapshot === spec.headSnapshot && status?.inProgress)
+    spec.publish &&
+    metadata.labels?.[postLabels.PUBLISHED] !== "true" &&
+    metadata.labels?.[postLabels.SCHEDULING_PUBLISH] !== "true"
   );
 });
 
-async function handlePublish() {
-  await apiClient.uc.post.publishMyPost({
-    name: props.post.post.metadata.name,
-  });
+const { mutateAsync: postPublishMutate } = usePostPublishMutate();
 
-  Toast.success(t("core.common.toast.publish_success"));
-  queryClient.invalidateQueries({ queryKey: ["my-posts"] });
+async function handlePublish() {
+  try {
+    await postPublishMutate({ name: props.post.post.metadata.name });
+
+    Toast.success(t("core.common.toast.publish_success"));
+    queryClient.invalidateQueries({ queryKey: ["my-posts"] });
+  } catch (_) {
+    Toast.error(t("core.common.toast.publish_failed_and_retry"));
+  }
 }
 
 function handleUnpublish() {
@@ -72,11 +87,30 @@ function handleUnpublish() {
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     async onConfirm() {
-      await apiClient.uc.post.unpublishMyPost({
+      await ucApiClient.content.post.unpublishMyPost({
         name: props.post.post.metadata.name,
       });
 
       Toast.success(t("core.common.toast.cancel_publish_success"));
+      queryClient.invalidateQueries({ queryKey: ["my-posts"] });
+    },
+  });
+}
+
+function handleDelete() {
+  Dialog.warning({
+    title: t("core.uc_post.operations.delete.title"),
+    description: t("core.uc_post.operations.delete.description"),
+    confirmType: "danger",
+    confirmText: t("core.common.buttons.confirm"),
+    cancelText: t("core.common.buttons.cancel"),
+    async onConfirm() {
+      await ucApiClient.content.post.recycleMyPost({
+        name: props.post.post.metadata.name,
+      });
+
+      Toast.success(t("core.common.toast.delete_success"));
+
       queryClient.invalidateQueries({ queryKey: ["my-posts"] });
     },
   });
@@ -86,13 +120,34 @@ function handleUnpublish() {
 <template>
   <VEntity>
     <template #start>
+      <VEntityField v-if="post.post.spec.cover">
+        <template #description>
+          <div class="aspect-h-2 aspect-w-3 w-20 overflow-hidden rounded-md">
+            <img
+              class="h-full w-full object-cover"
+              :src="
+                utils.attachment.getThumbnailUrl(
+                  post.post.spec.cover,
+                  GetThumbnailByUriSizeEnum.S
+                )
+              "
+              @error="
+                utils.attachment.handleThumbnailError(
+                  $event,
+                  post.post.spec.cover
+                )
+              "
+            />
+          </div>
+        </template>
+      </VEntityField>
       <VEntityField
         :title="post.post.spec.title"
         :route="{
           name: 'PostEditor',
           query: { name: post.post.metadata.name },
         }"
-        width="27rem"
+        max-width="30rem"
       >
         <template #extra>
           <VSpace class="mt-1 sm:mt-0">
@@ -110,7 +165,7 @@ function handleUnpublish() {
             <a
               target="_blank"
               :href="externalUrl"
-              class="hidden text-gray-600 transition-all hover:text-gray-900 group-hover:inline-block"
+              class="text-gray-600 opacity-0 transition-all hover:text-gray-900 group-hover:opacity-100"
             >
               <IconExternalLinkLine class="h-3.5 w-3.5" />
             </a>
@@ -168,15 +223,11 @@ function handleUnpublish() {
     <template #end>
       <VEntityField>
         <template #description>
-          <VAvatar
-            v-for="{ name, avatar, displayName } in post.contributors"
-            :key="name"
-            v-tooltip="displayName"
-            size="xs"
-            :src="avatar"
-            :alt="displayName"
-            circle
-          ></VAvatar>
+          <PostContributorList
+            :owner="post.owner"
+            :contributors="post.contributors"
+            :allow-view-user-detail="false"
+          />
         </template>
       </VEntityField>
       <VEntityField :description="publishStatus">
@@ -204,12 +255,33 @@ function handleUnpublish() {
         state="warning"
         animate
       />
-      <VEntityField
-        v-if="post.post.spec.publishTime"
-        :description="formatDatetime(post.post.spec.publishTime)"
-      ></VEntityField>
+      <VEntityField v-if="post.post.spec.publishTime">
+        <template #description>
+          <div class="inline-flex items-center space-x-2">
+            <span
+              v-tooltip="utils.date.format(post.post.spec.publishTime)"
+              class="entity-field-description"
+            >
+              {{ utils.date.timeAgo(post.post.spec.publishTime) }}
+            </span>
+            <IconTimerLine
+              v-if="
+                post.post.metadata.labels?.[postLabels.SCHEDULING_PUBLISH] ===
+                'true'
+              "
+              v-tooltip="$t('core.post.list.fields.schedule_publish.tooltip')"
+              class="text-sm"
+            />
+          </div>
+        </template>
+      </VEntityField>
     </template>
     <template #dropdownItems>
+      <HasPermission v-if="isPublished" :permissions="['uc:posts:publish']">
+        <VDropdownItem @click="handlePublish">
+          {{ $t("core.common.buttons.publish") }}
+        </VDropdownItem>
+      </HasPermission>
       <VDropdownItem
         @click="
           $router.push({
@@ -220,15 +292,15 @@ function handleUnpublish() {
       >
         {{ $t("core.common.buttons.edit") }}
       </VDropdownItem>
-      <HasPermission :permissions="['uc:posts:publish']">
-        <VDropdownItem
-          v-if="post.post.metadata.labels?.[postLabels.PUBLISHED] === 'false'"
-          @click="handlePublish"
-        >
-          {{ $t("core.common.buttons.publish") }}
-        </VDropdownItem>
-        <VDropdownItem v-else type="danger" @click="handleUnpublish">
+      <HasPermission v-if="!isPublished" :permissions="['uc:posts:publish']">
+        <VDropdownItem type="danger" @click="handleUnpublish">
           {{ $t("core.common.buttons.cancel_publish") }}
+        </VDropdownItem>
+      </HasPermission>
+      <HasPermission :permissions="['uc:posts:recycle']">
+        <VDropdownDivider />
+        <VDropdownItem type="danger" @click="handleDelete">
+          {{ $t("core.common.buttons.delete") }}
         </VDropdownItem>
       </HasPermission>
     </template>

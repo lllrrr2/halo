@@ -1,26 +1,25 @@
 package run.halo.app.content.comment;
 
 import static org.springdoc.core.fn.builders.parameter.Builder.parameterBuilder;
-import static run.halo.app.extension.index.query.QueryFactory.and;
-import static run.halo.app.extension.index.query.QueryFactory.contains;
-import static run.halo.app.extension.index.query.QueryFactory.equal;
-import static run.halo.app.extension.router.selector.SelectorUtil.labelAndFieldSelectorToListOptions;
+import static org.springframework.data.domain.Sort.Order.desc;
+import static run.halo.app.extension.index.query.Queries.contains;
+import static run.halo.app.extension.index.query.Queries.equal;
+import static run.halo.app.extension.index.query.Queries.greaterThan;
+import static run.halo.app.extension.index.query.Queries.or;
 
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import java.util.Optional;
 import org.apache.commons.lang3.StringUtils;
+import org.jspecify.annotations.Nullable;
 import org.springdoc.core.fn.builders.operation.Builder;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.reactive.function.server.ServerRequest;
-import org.springframework.web.server.ServerWebExchange;
 import run.halo.app.core.extension.User;
 import run.halo.app.core.extension.content.Comment;
-import run.halo.app.core.extension.endpoint.SortResolver;
 import run.halo.app.extension.ListOptions;
-import run.halo.app.extension.PageRequest;
-import run.halo.app.extension.PageRequestImpl;
 import run.halo.app.extension.router.IListRequest;
 import run.halo.app.extension.router.QueryParamBuildUtil;
-import run.halo.app.extension.router.selector.FieldSelector;
+import run.halo.app.extension.router.SortableRequest;
 
 /**
  * Query criteria for comment list.
@@ -28,83 +27,90 @@ import run.halo.app.extension.router.selector.FieldSelector;
  * @author guqing
  * @since 2.0.0
  */
-public class CommentQuery extends IListRequest.QueryListRequest {
-
-    private final ServerWebExchange exchange;
+public class CommentQuery extends SortableRequest {
 
     public CommentQuery(ServerRequest request) {
-        super(request.queryParams());
-        this.exchange = request.exchange();
+        super(request.exchange());
     }
 
-    public String getKeyword() {
-        String keyword = queryParams.getFirst("keyword");
-        return StringUtils.isBlank(keyword) ? null : keyword;
+    public @Nullable String getKeyword() {
+        return queryParams.getFirst("keyword");
     }
 
-    public String getOwnerKind() {
-        String ownerKind = queryParams.getFirst("ownerKind");
-        return StringUtils.isBlank(ownerKind) ? null : ownerKind;
+    public @Nullable String getOwnerKind() {
+        return queryParams.getFirst("ownerKind");
     }
 
-    public String getOwnerName() {
-        String ownerName = queryParams.getFirst("ownerName");
-        return StringUtils.isBlank(ownerName) ? null : ownerName;
+    /** Approval state filter: {@code true} for approved comments, {@code false} for pending. */
+    public @Nullable String getApproved() {
+        return queryParams.getFirst("approved");
     }
 
+    public @Nullable String getOwnerName() {
+        return queryParams.getFirst("ownerName");
+    }
+
+    @Override
     public Sort getSort() {
-        var sort = SortResolver.defaultInstance.resolve(exchange);
-        return sort.and(Sort.by("status.lastReplyTime",
-            "spec.creationTime",
-            "metadata.name"
-        ).descending());
+        // set default sort by last reply time
+        return super.getSort().and(Sort.by(desc("status.lastReplyTime")));
     }
 
-    public PageRequest toPageRequest() {
-        return PageRequestImpl.of(getPage(), getSize(), getSort());
-    }
-
-    /**
-     * Convert to list options.
-     */
+    /** Convert to list options. */
+    @Override
     public ListOptions toListOptions() {
-        var listOptions =
-            labelAndFieldSelectorToListOptions(getLabelSelector(), getFieldSelector());
-        var fieldQuery = listOptions.getFieldSelector().query();
+        var builder = ListOptions.builder(super.toListOptions());
 
-        String keyword = getKeyword();
-        if (StringUtils.isNotBlank(keyword)) {
-            fieldQuery = and(fieldQuery, contains("spec.raw", keyword));
-        }
+        Optional.ofNullable(getKeyword())
+                .filter(StringUtils::isNotBlank)
+                .ifPresent(keyword -> builder.andQuery(contains("spec.raw", keyword)));
 
-        String ownerName = getOwnerName();
-        if (StringUtils.isNotBlank(ownerName)) {
-            String ownerKind = StringUtils.defaultIfBlank(getOwnerKind(), User.KIND);
-            fieldQuery = and(fieldQuery,
-                equal("spec.owner", Comment.CommentOwner.ownerIdentity(ownerKind, ownerName)));
-        }
+        Optional.ofNullable(getApproved())
+                .filter(value -> "true".equals(value) || "false".equals(value))
+                .ifPresent(approved -> {
+                    var pendingCommentQuery = equal("spec.approved", approved);
+                    if (Boolean.parseBoolean(approved)) {
+                        builder.andQuery(pendingCommentQuery);
+                    } else {
+                        // also match comments having pending replies, so that the whole tree
+                        // containing a pending reply is listed when filtering by pending review
+                        builder.andQuery(or(pendingCommentQuery, greaterThan("status.pendingReplyCount", "0")));
+                    }
+                });
 
-        listOptions.setFieldSelector(FieldSelector.of(fieldQuery));
-        return listOptions;
+        Optional.ofNullable(getOwnerName()).filter(StringUtils::isNotBlank).ifPresent(ownerName -> {
+            var ownerKind = Optional.ofNullable(getOwnerKind())
+                    .filter(StringUtils::isNotBlank)
+                    .orElse(User.KIND);
+            builder.andQuery(equal("spec.owner", Comment.CommentOwner.ownerIdentity(ownerKind, ownerName)));
+        });
+
+        return builder.build();
     }
 
     public static void buildParameters(Builder builder) {
         IListRequest.buildParameters(builder);
         builder.parameter(QueryParamBuildUtil.sortParameter())
-            .parameter(parameterBuilder()
-                .in(ParameterIn.QUERY)
-                .name("keyword")
-                .description("Comments filtered by keyword.")
-                .implementation(String.class))
-            .parameter(parameterBuilder()
-                .in(ParameterIn.QUERY)
-                .name("ownerKind")
-                .description("Commenter kind.")
-                .implementation(String.class))
-            .parameter(parameterBuilder()
-                .in(ParameterIn.QUERY)
-                .name("ownerName")
-                .description("Commenter name.")
-                .implementation(String.class));
+                .parameter(parameterBuilder()
+                        .in(ParameterIn.QUERY)
+                        .name("keyword")
+                        .description("Keyword used to match the raw comment text.")
+                        .implementation(String.class))
+                .parameter(parameterBuilder()
+                        .in(ParameterIn.QUERY)
+                        .name("approved")
+                        .description("Approval state filter. When false, comments with pending replies "
+                                + "are also included.")
+                        .implementation(String.class))
+                .parameter(parameterBuilder()
+                        .in(ParameterIn.QUERY)
+                        .name("ownerKind")
+                        .description("Kind of the commenter identity. Defaults to User when ownerName is provided.")
+                        .implementation(String.class))
+                .parameter(parameterBuilder()
+                        .in(ParameterIn.QUERY)
+                        .name("ownerName")
+                        .description("Name of the commenter identity to filter by.")
+                        .implementation(String.class));
     }
 }

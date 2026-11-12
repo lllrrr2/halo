@@ -1,13 +1,13 @@
-import { storeToRefs } from "pinia";
-import { useGlobalInfoStore } from "@/stores/global-info";
-import { useRoute } from "vue-router";
+import { stores } from "@halo-dev/ui-shared";
 import { useTitle } from "@vueuse/core";
+import { storeToRefs } from "pinia";
 import { computed, type Ref } from "vue";
-import { AppName } from "@/constants/app";
 import { useI18n } from "vue-i18n";
+import { useRoute } from "vue-router";
+import { AppName } from "@/constants/app";
 
 export function useAppTitle(baseTitle?: Ref<string>) {
-  const { globalInfo } = storeToRefs(useGlobalInfoStore());
+  const { globalInfo } = storeToRefs(stores.globalInfo());
 
   const { t } = useI18n();
   const route = useRoute();

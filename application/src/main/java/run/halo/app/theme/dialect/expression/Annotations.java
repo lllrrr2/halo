@@ -1,14 +1,12 @@
 package run.halo.app.theme.dialect.expression;
 
 import java.util.Map;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import run.halo.app.theme.finders.vo.ExtensionVoOperator;
 
 /**
- * <p>Expression Object for performing annotations operations inside Halo Extra Expressions.</p>
- * An object of this class is usually available in variable evaluation expressions with the name
- * <code>#annotations</code>.
+ * Expression Object for performing annotations operations inside Halo Extra Expressions. An object of this class is
+ * usually available in variable evaluation expressions with the name <code>#annotations</code>.
  *
  * @author guqing
  * @since 2.0.2
@@ -22,8 +20,7 @@ public class Annotations {
      * @param key the key of annotation
      * @return annotation value if exists, otherwise null
      */
-    @Nullable
-    public String get(ExtensionVoOperator extension, String key) {
+    public @Nullable String get(ExtensionVoOperator extension, String key) {
         Map<String, String> annotations = extension.getMetadata().getAnnotations();
         if (annotations == null) {
             return null;
@@ -32,14 +29,13 @@ public class Annotations {
     }
 
     /**
-     * Returns the value to which the specified key is mapped, or defaultValue if
-     * <code>extension</code> contains no mapping for the key.
+     * Returns the value to which the specified key is mapped, or defaultValue if <code>extension</code> contains no
+     * mapping for the key.
      *
      * @param extension extension vo
      * @param key the key of annotation
      * @return annotation value if exists, otherwise defaultValue
      */
-    @NonNull
     public String getOrDefault(ExtensionVoOperator extension, String key, String defaultValue) {
         Map<String, String> annotations = extension.getMetadata().getAnnotations();
         if (annotations == null) {

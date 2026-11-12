@@ -1,4 +1,7 @@
 <script lang="ts" setup>
+import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
+import type { Backup } from "@halo-dev/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
 import {
   Dialog,
   Toast,
@@ -7,18 +10,14 @@ import {
   VEntityField,
   VSpace,
   VStatusDot,
+  type StatusDotState,
 } from "@halo-dev/components";
-import type { Backup } from "@halo-dev/api-client";
-import { relativeTimeTo, formatDatetime } from "@/utils/date";
-import { computed, markRaw } from "vue";
-import { apiClient } from "@/utils/api-client";
+import { utils, type OperationItem } from "@halo-dev/ui-shared";
 import { useQueryClient } from "@tanstack/vue-query";
 import prettyBytes from "pretty-bytes";
+import { computed, markRaw, toRefs } from "vue";
 import { useI18n } from "vue-i18n";
-import { useOperationItemExtensionPoint } from "@console/composables/use-operation-extension-points";
 import EntityDropdownItems from "@/components/entity/EntityDropdownItems.vue";
-import { toRefs } from "vue";
-import type { OperationItem } from "@halo-dev/console-shared";
 
 const queryClient = useQueryClient();
 const { t } = useI18n();
@@ -37,7 +36,7 @@ const { backup } = toRefs(props);
 
 type Phase = {
   text: string;
-  state: "default" | "warning" | "success" | "error";
+  state: StatusDotState;
   animate: boolean;
   value: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 };
@@ -83,7 +82,7 @@ const getFailureMessage = computed(() => {
 
 function handleDownload() {
   window.open(
-    `/apis/api.console.migration.halo.run/v1alpha1/backups/${props.backup.metadata.name}/files/${props.backup.status?.filename}`,
+    `/apis/console.api.migration.halo.run/v1alpha1/backups/${props.backup.metadata.name}/files/${props.backup.status?.filename}`,
     "_blank"
   );
 }
@@ -96,7 +95,7 @@ function handleDelete() {
     confirmText: t("core.common.buttons.confirm"),
     cancelText: t("core.common.buttons.cancel"),
     async onConfirm() {
-      await apiClient.extension.backup.deletemigrationHaloRunV1alpha1Backup({
+      await coreApiClient.migration.backup.deleteBackup({
         name: props.backup.metadata.name,
       });
 
@@ -107,7 +106,7 @@ function handleDelete() {
   });
 }
 
-const { operationItems } = useOperationItemExtensionPoint<Backup>(
+const { data: operationItems } = useOperationItemExtensionPoint<Backup>(
   "backup:list-item:operation:create",
   backup,
   computed((): OperationItem<Backup>[] => [
@@ -178,7 +177,7 @@ const { operationItems } = useOperationItemExtensionPoint<Backup>(
           <span class="truncate text-xs tabular-nums text-gray-500">
             {{
               $t("core.backup.list.fields.expiresAt", {
-                expiresAt: relativeTimeTo(backup.spec?.expiresAt),
+                expiresAt: utils.date.timeAgo(backup.spec?.expiresAt),
               })
             }}
           </span>
@@ -187,14 +186,17 @@ const { operationItems } = useOperationItemExtensionPoint<Backup>(
       <VEntityField v-if="backup.metadata.creationTimestamp">
         <template #description>
           <span class="truncate text-xs tabular-nums text-gray-500">
-            {{ formatDatetime(backup.metadata.creationTimestamp) }}
+            {{ utils.date.format(backup.metadata.creationTimestamp) }}
           </span>
         </template>
       </VEntityField>
       <slot name="end"></slot>
     </template>
     <template v-if="showOperations" #dropdownItems>
-      <EntityDropdownItems :dropdown-items="operationItems" :item="backup" />
+      <EntityDropdownItems
+        :dropdown-items="operationItems || []"
+        :item="backup"
+      />
     </template>
   </VEntity>
 </template>

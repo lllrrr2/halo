@@ -14,20 +14,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import run.halo.app.core.extension.content.Comment;
-import run.halo.app.extension.Extension;
-import run.halo.app.extension.ExtensionStoreUtil;
-import run.halo.app.extension.GroupVersionKind;
-import run.halo.app.extension.PageRequestImpl;
-import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.extension.Ref;
-import run.halo.app.extension.SchemeManager;
-import run.halo.app.extension.index.IndexerFactory;
+import run.halo.app.extension.*;
 import run.halo.app.extension.store.ReactiveExtensionStoreClient;
 import run.halo.app.infra.utils.JsonUtils;
 
@@ -48,66 +41,59 @@ class CommentServiceImplIntegrationTest {
         @Autowired
         private SchemeManager schemeManager;
 
-        @SpyBean
+        @MockitoSpyBean
         private ReactiveExtensionClient reactiveClient;
 
         @Autowired
         private ReactiveExtensionStoreClient storeClient;
 
-        @Autowired
-        private IndexerFactory indexerFactory;
-
-        @SpyBean
+        @MockitoSpyBean
         private CommentServiceImpl commentService;
 
         Mono<Extension> deleteImmediately(Extension extension) {
             var name = extension.getMetadata().getName();
             var scheme = schemeManager.get(extension.getClass());
-            // un-index
-            var indexer = indexerFactory.getIndexer(extension.groupVersionKind());
-            indexer.unIndexRecord(extension.getMetadata().getName());
 
             // delete from db
             var storeName = ExtensionStoreUtil.buildStoreName(scheme, name);
-            return storeClient.delete(storeName, extension.getMetadata().getVersion())
-                .thenReturn(extension);
+            return storeClient
+                    .delete(storeName, extension.getMetadata().getVersion())
+                    .thenReturn(extension);
         }
 
         @BeforeEach
         void setUp() {
             Flux.fromIterable(storedComments)
-                .flatMap(post -> reactiveClient.create(post))
-                .as(StepVerifier::create)
-                .expectNextCount(storedComments.size())
-                .verifyComplete();
+                    .flatMap(post -> reactiveClient.create(post))
+                    .as(StepVerifier::create)
+                    .expectNextCount(storedComments.size())
+                    .verifyComplete();
         }
 
         @AfterEach
         void tearDown() {
             Flux.fromIterable(storedComments)
-                .flatMap(this::deleteImmediately)
-                .as(StepVerifier::create)
-                .expectNextCount(storedComments.size())
-                .verifyComplete();
+                    .flatMap(this::deleteImmediately)
+                    .as(StepVerifier::create)
+                    .expectNextCount(storedComments.size())
+                    .verifyComplete();
         }
 
         @Test
         void commentBatchDeletionTest() {
-            Ref ref = Ref.of("67",
-                GroupVersionKind.fromAPIVersionAndKind("content.halo.run/v1alpha1", "SinglePage"));
-            commentService.removeBySubject(ref)
-                .as(StepVerifier::create)
-                .verifyComplete();
+            Ref ref = Ref.of("67", GroupVersionKind.fromAPIVersionAndKind("content.halo.run/v1alpha1", "SinglePage"));
+            commentService.removeBySubject(ref).as(StepVerifier::create).verifyComplete();
 
             verify(reactiveClient, times(storedComments.size())).delete(any(Comment.class));
             verify(commentService, times(2)).listCommentsByRef(eq(ref), any());
 
-            commentService.listCommentsByRef(ref, PageRequestImpl.ofSize(1))
-                .as(StepVerifier::create)
-                .consumeNextWith(result -> {
-                    assertThat(result.getTotal()).isEqualTo(0);
-                })
-                .verifyComplete();
+            commentService
+                    .listCommentsByRef(ref, PageRequestImpl.ofSize(1))
+                    .as(StepVerifier::create)
+                    .consumeNextWith(result -> {
+                        assertThat(result.getTotal()).isEqualTo(0);
+                    })
+                    .verifyComplete();
         }
 
         List<Comment> createComments(int size) {

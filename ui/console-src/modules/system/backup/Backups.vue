@@ -1,22 +1,19 @@
 <script lang="ts" setup>
 import {
-  VPageHeader,
-  VCard,
-  VButton,
-  VTabbar,
   IconAddCircle,
   IconServerLine,
+  VButton,
+  VCard,
+  VLoading,
+  VPageHeader,
+  VTabbar,
 } from "@halo-dev/components";
-
-import { onMounted, shallowRef } from "vue";
-import ListTab from "./tabs/List.vue";
-import RestoreTab from "./tabs/Restore.vue";
+import type { BackupTab } from "@halo-dev/ui-shared";
 import { useRouteQuery } from "@vueuse/router";
-import { markRaw } from "vue";
+import { defineAsyncComponent, onMounted, shallowRef } from "vue";
 import { useI18n } from "vue-i18n";
-import { useBackup } from "./composables/use-backup";
 import { usePluginModuleStore } from "@/stores/plugin";
-import type { BackupTab } from "@halo-dev/console-shared";
+import { useBackup } from "./composables/use-backup";
 
 const { t } = useI18n();
 
@@ -24,12 +21,18 @@ const tabs = shallowRef<BackupTab[]>([
   {
     id: "backups",
     label: t("core.backup.tabs.backup_list"),
-    component: markRaw(ListTab),
+    component: defineAsyncComponent({
+      loader: () => import("./tabs/List.vue"),
+      loadingComponent: VLoading,
+    }),
   },
   {
     id: "restore",
     label: t("core.backup.tabs.restore"),
-    component: markRaw(RestoreTab),
+    component: defineAsyncComponent({
+      loader: () => import("./tabs/Restore.vue"),
+      loadingComponent: VLoading,
+    }),
   },
 ]);
 
@@ -37,33 +40,39 @@ const activeTab = useRouteQuery<string>("tab", tabs.value[0].id);
 
 const { handleCreate } = useBackup();
 
-onMounted(() => {
-  const { pluginModules } = usePluginModuleStore();
+const { pluginModules } = usePluginModuleStore();
 
-  pluginModules.forEach((pluginModule) => {
-    const { extensionPoints } = pluginModule;
-    if (!extensionPoints?.["backup:tabs:create"]) {
-      return;
+onMounted(async () => {
+  for (const pluginModule of pluginModules) {
+    try {
+      const callbackFunction =
+        pluginModule?.extensionPoints?.["backup:tabs:create"];
+
+      if (typeof callbackFunction !== "function") {
+        continue;
+      }
+
+      const backupTabs = await callbackFunction();
+
+      if (backupTabs) {
+        tabs.value = tabs.value.concat(backupTabs);
+      }
+    } catch (error) {
+      console.error(`Error processing plugin module:`, pluginModule, error);
     }
-
-    const backupTabs = extensionPoints["backup:tabs:create"]() as BackupTab[];
-
-    if (backupTabs) {
-      tabs.value = tabs.value.concat(backupTabs);
-    }
-  });
+  }
 });
 </script>
 
 <template>
   <VPageHeader :title="$t('core.backup.title')">
     <template #icon>
-      <IconServerLine class="mr-2 self-center" />
+      <IconServerLine />
     </template>
     <template #actions>
       <VButton type="secondary" @click="handleCreate">
         <template #icon>
-          <IconAddCircle class="h-full w-full" />
+          <IconAddCircle />
         </template>
         {{ $t("core.backup.operations.create.button") }}
       </VButton>

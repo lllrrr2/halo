@@ -1,83 +1,83 @@
 <script lang="ts" setup>
-import { VButton, VModal, VTabbar } from "@halo-dev/components";
+import type { Theme } from "@halo-dev/api-client";
+import { VButton, VLoading, VModal, VTabbar } from "@halo-dev/components";
+import { utils, type ThemeListTab } from "@halo-dev/ui-shared";
 import {
   computed,
-  ref,
-  watch,
-  provide,
+  defineAsyncComponent,
   inject,
-  markRaw,
-  nextTick,
   onMounted,
+  provide,
+  ref,
+  shallowRef,
   type Ref,
 } from "vue";
-import type { Theme } from "@halo-dev/api-client";
 import { useI18n } from "vue-i18n";
-import { useRouteQuery } from "@vueuse/router";
-import InstalledThemes from "./list-tabs/InstalledThemes.vue";
-import NotInstalledThemes from "./list-tabs/NotInstalledThemes.vue";
-import LocalUpload from "./list-tabs/LocalUpload.vue";
-import RemoteDownload from "./list-tabs/RemoteDownload.vue";
 import { usePluginModuleStore } from "@/stores/plugin";
-import type { PluginModule, ThemeListTab } from "@halo-dev/console-shared";
-import { usePermission } from "@/utils/permission";
 
 const { t } = useI18n();
-const { currentUserHasPermission } = usePermission();
-
-const props = withDefaults(
-  defineProps<{
-    visible: boolean;
-  }>(),
-  {
-    visible: false,
-  }
-);
 
 const selectedTheme = inject<Ref<Theme | undefined>>("selectedTheme", ref());
 
-watch(
-  () => selectedTheme.value,
-  (value, oldValue) => {
-    if (value && oldValue) {
-      emit("select", value);
-      onVisibleChange(false);
-    }
-  }
-);
-
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
   (event: "select", theme: Theme | undefined): void;
 }>();
 
-const tabs = ref<ThemeListTab[]>([
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+
+defineExpose({
+  close: () => modal.value?.close(),
+});
+
+const tabs = shallowRef<ThemeListTab[]>([
   {
     id: "installed",
     label: t("core.theme.list_modal.tabs.installed"),
-    component: markRaw(InstalledThemes),
+    component: defineAsyncComponent({
+      loader: () => import("./list-tabs/InstalledThemes.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 10,
   },
   {
     id: "local-upload",
     label: t("core.theme.list_modal.tabs.local_upload"),
-    component: markRaw(LocalUpload),
+    component: defineAsyncComponent({
+      loader: () => import("./list-tabs/LocalUpload.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 20,
   },
   {
     id: "remote-download",
     label: t("core.theme.list_modal.tabs.remote_download.label"),
-    component: markRaw(RemoteDownload),
+    component: defineAsyncComponent({
+      loader: () => import("./list-tabs/RemoteDownload.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 30,
   },
   {
     id: "not_installed",
     label: t("core.theme.list_modal.tabs.not_installed"),
-    component: markRaw(NotInstalledThemes),
+    component: defineAsyncComponent({
+      loader: () => import("./list-tabs/NotInstalledThemes.vue"),
+      loadingComponent: VLoading,
+    }),
     priority: 40,
   },
 ]);
+
+provide<Ref<Theme | undefined>>(
+  "selectedTheme",
+  computed({
+    get: () => selectedTheme.value,
+    set: (theme) => {
+      emit("select", theme);
+    },
+  })
+);
 
 const activeTabId = ref();
 
@@ -88,43 +88,31 @@ const modalTitle = computed(() => {
   return tab?.label;
 });
 
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
-
-// handle remote wordpress url from route
-const remoteDownloadUrl = useRouteQuery<string>("remote-download-url");
-watch(
-  () => props.visible,
-  (visible) => {
-    if (visible && remoteDownloadUrl.value) {
-      nextTick(() => {
-        activeTabId.value = "remote-download";
-      });
-    }
-  }
-);
-
 const { pluginModules } = usePluginModuleStore();
-onMounted(() => {
+
+onMounted(async () => {
   const tabsFromPlugins: ThemeListTab[] = [];
-  pluginModules.forEach((pluginModule: PluginModule) => {
-    const { extensionPoints } = pluginModule;
-    if (!extensionPoints?.["theme:list:tabs:create"]) {
-      return;
+
+  for (const pluginModule of pluginModules) {
+    try {
+      const callbackFunction =
+        pluginModule?.extensionPoints?.["theme:list:tabs:create"];
+
+      if (typeof callbackFunction !== "function") {
+        continue;
+      }
+
+      const items = await callbackFunction();
+
+      tabsFromPlugins.push(
+        ...items.filter((item) => {
+          return utils.permission.has(item.permissions || []);
+        })
+      );
+    } catch (error) {
+      console.error(`Error processing plugin module:`, pluginModule, error);
     }
-
-    let items = extensionPoints["theme:list:tabs:create"]() as ThemeListTab[];
-
-    items = items.filter((item) => {
-      return currentUserHasPermission(item.permissions);
-    });
-
-    tabsFromPlugins.push(...items);
-  });
+  }
 
   tabs.value = tabs.value.concat(tabsFromPlugins).sort((a, b) => {
     return a.priority - b.priority;
@@ -135,11 +123,11 @@ onMounted(() => {
 </script>
 <template>
   <VModal
-    :visible="visible"
+    ref="modal"
     :width="920"
     height="calc(100vh - 20px)"
     :title="modalTitle"
-    @update:visible="onVisibleChange"
+    @close="emit('close')"
   >
     <VTabbar
       v-model:active-id="activeTabId"
@@ -162,7 +150,7 @@ onMounted(() => {
     </div>
 
     <template #footer>
-      <VButton @click="onVisibleChange(false)">
+      <VButton @click="modal?.close()">
         {{ $t("core.common.buttons.close") }}
       </VButton>
     </template>

@@ -1,149 +1,111 @@
-<script setup lang="ts" name="BubbleMenu">
-import { ref, type PropType, watch, computed, nextTick } from "vue";
-import type { PluginKey, Editor } from "@/tiptap";
-import type { SearchAndReplacePluginState } from "./SearchAndReplacePlugin";
+<script setup lang="ts">
+import { vTooltip } from "@halo-dev/components";
+import { FindAndReplacePluginKey } from "@tiptap/extension-find-and-replace";
+import { computed, nextTick, onBeforeUnmount, shallowRef, watch } from "vue";
+import LucideReplace from "~icons/lucide/replace";
+import LucideReplaceAll from "~icons/lucide/replace-all";
 import MdiFormatLetterCase from "~icons/mdi/format-letter-case";
 import MdiFormatLetterMatches from "~icons/mdi/format-letter-matches";
 import MdiRegex from "~icons/mdi/regex";
-import MdiArrowUp from "~icons/mdi/arrow-up";
-import MdiArrowDown from "~icons/mdi/arrow-down";
-import MdiClose from "~icons/mdi/close";
-import LucideReplace from "~icons/lucide/replace";
-import LucideReplaceAll from "~icons/lucide/replace-all";
+import MingcuteArrowDownLine from "~icons/mingcute/arrow-down-line";
+import MingcuteArrowUpLine from "~icons/mingcute/arrow-up-line";
+import MingcuteCloseLine from "~icons/mingcute/close-line";
 import { i18n } from "@/locales";
+import type { Editor } from "@/tiptap";
+import IconButton from "./IconButton.vue";
+import MatchToggleButton from "./MatchToggleButton.vue";
+import type { SearchAndReplacePanelState } from "./types";
 
-const props = defineProps({
-  editor: {
-    type: Object as PropType<Editor>,
-    required: true,
-  },
-  pluginKey: {
-    type: Object as PropType<PluginKey<SearchAndReplacePluginState>>,
-    required: true,
-  },
-  visible: {
-    type: Boolean,
-    default: false,
-  },
+const props = defineProps<{
+  editor: Editor;
+  panel: SearchAndReplacePanelState;
+}>();
+
+const emit = defineEmits<{
+  searchTermChange: [value: string];
+  replaceTermChange: [value: string];
+  caseSensitiveChange: [value: boolean];
+  useRegexChange: [value: boolean];
+  wholeWordChange: [value: boolean];
+}>();
+
+const searchTerm = shallowRef(props.panel.searchTerm);
+const replaceTerm = shallowRef(props.panel.replaceTerm);
+const caseSensitive = shallowRef(props.panel.caseSensitive);
+const useRegex = shallowRef(props.panel.useRegex);
+const wholeWord = shallowRef(props.panel.wholeWord);
+const transactionVersion = shallowRef(0);
+
+const handleTransaction = () => {
+  transactionVersion.value += 1;
+};
+
+props.editor.on("transaction", handleTransaction);
+onBeforeUnmount(() => {
+  props.editor.off("transaction", handleTransaction);
 });
 
-const searchTerm = ref<string>("");
-const replaceTerm = ref<string>("");
-const regex = ref<boolean>(false);
-const caseSensitive = ref<boolean>(false);
-const matchWord = ref<boolean>(false);
-const flag = ref<boolean>(false);
-
 const findState = computed(() => {
-  void flag.value;
-  const { editor, pluginKey } = props;
-  if (!editor || !pluginKey) {
-    return {
-      findIndex: 0,
-      findCount: 0,
-    };
-  }
-  const state = pluginKey.getState(editor.state);
+  void transactionVersion.value;
+  const state = FindAndReplacePluginKey.getState(props.editor.state);
+
   return {
-    findIndex: state?.findIndex || 0,
-    findCount: state?.findCount || 0,
+    findIndex: state?.currentIndex ?? 0,
+    findCount: state?.results.length ?? 0,
   };
 });
 
 const findNextSearchResult = () => {
-  props.editor.commands.findNext();
+  props.editor.commands.goToNextResult();
 };
 
 const findPreviousSearchResult = () => {
-  props.editor.commands.findPrevious();
-};
-
-const updateSearchReplace = (value: any) => {
-  const { editor, pluginKey } = props;
-  if (!editor || !pluginKey) {
-    return;
-  }
-  const tr = editor.state.tr;
-  tr.setMeta(pluginKey, value);
-  editor.view.dispatch(tr);
-  flag.value = !flag.value;
+  props.editor.commands.goToPreviousResult();
 };
 
 const replace = () => {
   props.editor.commands.replace();
-  flag.value = !flag.value;
 };
 
 const replaceAll = () => {
   props.editor.commands.replaceAll();
-  flag.value = !flag.value;
 };
 
 const handleCloseSearch = () => {
   props.editor.commands.closeSearch();
 };
 
-watch(
-  () => searchTerm.value.trim(),
-  (val, oldVal) => {
-    if (val !== oldVal) {
-      updateSearchReplace({
-        setSearchTerm: val,
-      });
-    }
-  }
-);
+watch(searchTerm, (value) => {
+  emit("searchTermChange", value);
+  props.editor.commands.setSearchTerm(value);
+});
+
+watch(replaceTerm, (value) => {
+  emit("replaceTermChange", value);
+  props.editor.commands.setReplaceTerm(value);
+});
+
+watch(caseSensitive, (value) => {
+  emit("caseSensitiveChange", value);
+  props.editor.commands.setCaseSensitive(value);
+});
+
+watch(useRegex, (value) => {
+  emit("useRegexChange", value);
+  props.editor.commands.setUseRegex(value);
+});
+
+watch(wholeWord, (value) => {
+  emit("wholeWordChange", value);
+  props.editor.commands.setWholeWord(value);
+});
+
+const searchInput = shallowRef<HTMLInputElement | null>(null);
 
 watch(
-  () => replaceTerm.value.trim(),
-  (val, oldVal) => {
-    if (val !== oldVal) {
-      updateSearchReplace({
-        setReplaceTerm: val,
-      });
-    }
-  }
-);
-
-watch(
-  () => regex.value,
-  (val, oldVal) => {
-    if (val !== oldVal) {
-      updateSearchReplace({
-        setRegex: val,
-      });
-    }
-  }
-);
-
-watch(
-  () => caseSensitive.value,
-  (val, oldVal) => {
-    if (val !== oldVal) {
-      updateSearchReplace({
-        setCaseSensitive: val,
-      });
-    }
-  }
-);
-
-watch(
-  () => matchWord.value,
-  (val, oldVal) => {
-    if (val !== oldVal) {
-      updateSearchReplace({
-        setMatchWord: val,
-      });
-    }
-  }
-);
-
-const searchInput = ref<HTMLInputElement | null>(null);
-
-watch(
-  () => props.visible,
-  (val) => {
-    if (val) {
+  () => props.panel.visible,
+  (visible) => {
+    if (visible) {
       nextTick(() => {
         searchInput.value?.focus();
       });
@@ -152,19 +114,19 @@ watch(
 );
 </script>
 <template>
-  <Transition v-show="visible" appear name="slide">
+  <Transition v-show="panel.visible" appear name="slide">
     <div
-      class="absolute float-right top-0 right-5 z-50 flex justify-end bg-white shadow p-1 !pt-2 rounded min-w-[500px]"
+      class="absolute right-5 top-0 z-50 float-right flex min-w-[500px] justify-end rounded bg-white p-1 !pt-2 shadow"
       @keydown.escape.prevent="handleCloseSearch"
     >
-      <section class="w-full flex flex-col gap-1">
-        <div class="flex items-center relative">
+      <section class="flex w-full flex-col gap-2">
+        <div class="relative flex items-center">
           <div class="relative w-full max-w-[55%]">
             <input
               ref="searchInput"
               v-model="searchTerm"
               type="text"
-              class="block w-full p-1 ps-2 !pr-[5.5rem] bg-gray-50 rounded border !border-solid !text-sm !leading-7 border-gray-300 text-gray-900 focus:ring-blue-500 focus:border-blue-500"
+              class="block size-full h-9 rounded-md bg-white px-3 text-sm text-gray-900 ring-1 ring-gray-100 transition-all placeholder:text-gray-400 focus:!ring-1 focus:!ring-primary"
               :placeholder="
                 i18n.global.t(
                   'editor.extensions.search_and_replace.search_placeholder'
@@ -173,118 +135,92 @@ watch(
               tabindex="2"
               @keydown.enter.prevent="findNextSearchResult"
             />
-            <div class="absolute inset-y-0 end-0 flex items-center pr-1 gap-1">
-              <button
-                :title="
+            <div class="absolute inset-y-0 end-0 flex items-center gap-1 pr-1">
+              <MatchToggleButton
+                v-tooltip="
                   i18n.global.t(
                     'editor.extensions.search_and_replace.case_sensitive'
                   )
                 "
-                type="button"
-                class="p-0.5 rounded-sm hover:bg-gray-200"
-                :class="{
-                  '!bg-blue-200 outline outline-1 outline-blue-500 hover:!bg-blue-200':
-                    caseSensitive,
-                }"
+                :is-active="caseSensitive"
                 @click="caseSensitive = !caseSensitive"
               >
-                <MdiFormatLetterCase></MdiFormatLetterCase>
-              </button>
-              <button
-                :title="
+                <MdiFormatLetterCase />
+              </MatchToggleButton>
+              <MatchToggleButton
+                v-tooltip="
                   i18n.global.t(
                     'editor.extensions.search_and_replace.match_word'
                   )
                 "
-                type="button"
-                class="p-0.5 rounded-sm hover:bg-gray-200"
-                :class="{
-                  '!bg-blue-200 outline outline-1 outline-blue-500 hover:!bg-blue-200':
-                    matchWord,
-                }"
-                @click="matchWord = !matchWord"
+                :is-active="wholeWord"
+                @click="wholeWord = !wholeWord"
               >
-                <MdiFormatLetterMatches></MdiFormatLetterMatches>
-              </button>
-              <button
-                :title="
+                <MdiFormatLetterMatches />
+              </MatchToggleButton>
+              <MatchToggleButton
+                v-tooltip="
                   i18n.global.t(
                     'editor.extensions.search_and_replace.use_regex'
                   )
                 "
-                type="button"
-                class="p-0.5 rounded-sm hover:bg-gray-200"
-                :class="{
-                  '!bg-blue-200 outline outline-1 outline-blue-500 hover:!bg-blue-200':
-                    regex,
-                }"
-                @click="regex = !regex"
+                :is-active="useRegex"
+                @click="useRegex = !useRegex"
               >
-                <MdiRegex></MdiRegex>
-              </button>
+                <MdiRegex />
+              </MatchToggleButton>
             </div>
           </div>
-          <div class="min-w-[130px] text-sm mx-2">
-            <div v-if="findState.findCount === 0">
-              <span :class="{ 'text-red-600': searchTerm.length > 0 }">{{
+          <div class="mx-2 min-w-[130px] text-sm">
+            <span
+              v-if="findState.findCount === 0"
+              :class="{ 'text-red-600': searchTerm.length > 0 }"
+            >
+              {{
                 i18n.global.t("editor.extensions.search_and_replace.not_found")
-              }}</span>
-            </div>
-            <div v-else>
-              <span>
-                {{
-                  i18n.global.t(
-                    "editor.extensions.search_and_replace.occurrence_found",
-                    {
-                      index: findState.findIndex + 1,
-                      total: findState.findCount,
-                    }
-                  )
-                }}
-              </span>
-            </div>
+              }}
+            </span>
+            <span v-else>
+              {{
+                i18n.global.t(
+                  "editor.extensions.search_and_replace.occurrence_found",
+                  {
+                    index: findState.findIndex + 1,
+                    total: findState.findCount,
+                  }
+                )
+              }}
+            </span>
           </div>
-          <div class="h-full flex items-center absolute right-0">
-            <button
-              :title="
+          <div class="absolute right-0 flex h-full items-center">
+            <IconButton
+              v-tooltip="
                 i18n.global.t(
                   'editor.extensions.search_and_replace.find_previous'
                 )
               "
-              type="button"
-              class="p-0.5 rounded-sm opacity-50"
-              :class="{
-                'hover:!bg-gray-200 !opacity-100': findState.findCount > 0,
-              }"
               :disabled="findState.findCount === 0"
               @click="findPreviousSearchResult"
             >
-              <MdiArrowUp></MdiArrowUp>
-            </button>
-            <button
-              :title="
+              <MingcuteArrowUpLine />
+            </IconButton>
+            <IconButton
+              v-tooltip="
                 i18n.global.t('editor.extensions.search_and_replace.find_next')
               "
-              type="button"
-              class="p-0.5 rounded-sm opacity-50"
-              :class="{
-                'hover:!bg-gray-200 !opacity-100': findState.findCount > 0,
-              }"
               :disabled="findState.findCount === 0"
               @click="findNextSearchResult"
             >
-              <MdiArrowDown></MdiArrowDown>
-            </button>
-            <button
-              :title="
+              <MingcuteArrowDownLine />
+            </IconButton>
+            <IconButton
+              v-tooltip="
                 i18n.global.t('editor.extensions.search_and_replace.close')
               "
-              type="button"
-              class="p-0.5 rounded-sm hover:bg-gray-200"
               @click="handleCloseSearch"
             >
-              <MdiClose></MdiClose>
-            </button>
+              <MingcuteCloseLine />
+            </IconButton>
           </div>
         </div>
 
@@ -293,7 +229,7 @@ watch(
             <input
               v-model="replaceTerm"
               type="text"
-              class="block w-full p-1 ps-2 rounded bg-gray-50 border !border-solid !text-sm !leading-7 border-gray-300 text-gray-900 focus:ring-blue-500 focus:border-blue-500"
+              class="block size-full h-9 rounded-md bg-white px-3 text-sm text-gray-900 ring-1 ring-gray-100 transition-all placeholder:text-gray-400 focus:!ring-1 focus:!ring-primary"
               :placeholder="
                 i18n.global.t(
                   'editor.extensions.search_and_replace.replace_placeholder'
@@ -303,37 +239,28 @@ watch(
               @keydown.enter.prevent="replace"
             />
           </div>
-          <div class="flex items-center gap-2 mx-2">
-            <button
-              :title="
+          <div class="mx-2 flex items-center gap-2">
+            <IconButton
+              v-tooltip="
                 i18n.global.t('editor.extensions.search_and_replace.replace')
               "
-              type="button"
-              class="p-0.5 rounded-sm opacity-50"
-              :class="{
-                'hover:!bg-gray-200 !opacity-100': findState.findCount > 0,
-              }"
               :disabled="findState.findCount === 0"
               @click="replace"
             >
-              <LucideReplace></LucideReplace>
-            </button>
-            <button
-              :title="
+              <LucideReplace />
+            </IconButton>
+
+            <IconButton
+              v-tooltip="
                 i18n.global.t(
                   'editor.extensions.search_and_replace.replace_all'
                 )
               "
-              type="button"
-              class="p-0.5 rounded-sm opacity-50"
-              :class="{
-                'hover:!bg-gray-200 !opacity-100': findState.findCount > 0,
-              }"
               :disabled="findState.findCount === 0"
               @click="replaceAll"
             >
-              <LucideReplaceAll></LucideReplaceAll>
-            </button>
+              <LucideReplaceAll />
+            </IconButton>
           </div>
         </div>
       </section>

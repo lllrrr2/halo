@@ -1,16 +1,13 @@
 <script lang="ts" setup>
-import type { User } from "@halo-dev/api-client";
-import { useUserFetch } from "@console/modules/system/users/composables/use-user";
+import { consoleApiClient, type User } from "@halo-dev/api-client";
 import {
-  IconArrowDown,
   VAvatar,
-  VDropdown,
-  VEntity,
-  VEntityField,
+  VFilterDropdown,
+  type FilterDropdownOption,
+  type FilterDropdownValue,
 } from "@halo-dev/components";
-import { setFocus } from "@/formkit/utils/focus";
-import { computed, ref, watch } from "vue";
-import Fuse from "fuse.js";
+import { useQuery } from "@tanstack/vue-query";
+import { computed, ref, toRefs } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -22,117 +19,141 @@ const props = withDefaults(
   }
 );
 
+const { modelValue } = toRefs(props);
+
 const emit = defineEmits<{
   (event: "update:modelValue", value?: string): void;
 }>();
 
-const { users } = useUserFetch({ fetchOnMounted: true });
-
-const dropdown = ref();
-
-const handleSelect = (user: User) => {
-  if (user.metadata.name === props.modelValue) {
-    emit("update:modelValue", undefined);
-  } else {
-    emit("update:modelValue", user.metadata.name);
-  }
-
-  dropdown.value.hide();
-};
-
-function onDropdownShow() {
-  setTimeout(() => {
-    setFocus("userFilterDropdownInput");
-  }, 200);
-}
-
-// search
 const keyword = ref("");
 
-let fuse: Fuse<User> | undefined = undefined;
+const { data: selectedUser } = useQuery({
+  queryKey: ["core:users:by-name", modelValue],
+  queryFn: async () => {
+    if (!modelValue.value) {
+      return null;
+    }
 
-watch(
-  () => users.value,
-  () => {
-    fuse = new Fuse(users.value, {
-      keys: ["spec.displayName", "metadata.name", "spec.email"],
-      useExtendedSearch: true,
-      threshold: 0.2,
+    const { data } = await consoleApiClient.user.getUserDetail({
+      name: modelValue.value,
+    });
+
+    return data.user;
+  },
+  cacheTime: 0,
+});
+
+const { data: users, isFetching } = useQuery({
+  queryKey: ["core:users", keyword],
+  queryFn: async () => {
+    const { data } = await consoleApiClient.user.listUsers({
+      fieldSelector: [`name!=anonymousUser`],
+      keyword: keyword.value,
+      page: 1,
+      size: 30,
+    });
+
+    return data?.items?.map((user) => user.user) || [];
+  },
+  staleTime: 2000,
+});
+
+const userMap = computed(() => {
+  const map = new Map<string, User>();
+
+  users.value?.forEach((user) => {
+    map.set(user.metadata.name, user);
+  });
+
+  if (selectedUser.value) {
+    map.set(selectedUser.value.metadata.name, selectedUser.value);
+  }
+
+  return map;
+});
+
+const options = computed<FilterDropdownOption[]>(() => {
+  const items =
+    users.value?.map((user) => ({
+      label: user.spec.displayName,
+      value: user.metadata.name,
+      description: user.metadata.name,
+    })) || [];
+
+  if (
+    selectedUser.value &&
+    !items.some((item) => item.value === selectedUser.value?.metadata.name)
+  ) {
+    items.unshift({
+      label: selectedUser.value.spec.displayName,
+      value: selectedUser.value.metadata.name,
+      description: selectedUser.value.metadata.name,
     });
   }
-);
 
-const searchResults = computed(() => {
-  if (!fuse || !keyword.value) {
-    return users.value;
+  return items;
+});
+
+function getUser(option: FilterDropdownOption) {
+  if (option.value === undefined) {
+    return undefined;
   }
 
-  return fuse?.search(keyword.value).map((item) => item.item);
-});
+  return userMap.value.get(String(option.value));
+}
 
-const selectedUser = computed(() => {
-  return users.value.find((user) => user.metadata.name === props.modelValue);
-});
+function showUsername(option: FilterDropdownOption) {
+  if (!option.description) {
+    return false;
+  }
+
+  return (
+    option.description.toLowerCase() !== (option.label || "").toLowerCase()
+  );
+}
+
+function handleUpdate(value?: FilterDropdownValue) {
+  emit("update:modelValue", typeof value === "string" ? value : undefined);
+}
 </script>
 
 <template>
-  <VDropdown ref="dropdown" :classes="['!p-0']" @show="onDropdownShow">
-    <div
-      class="flex cursor-pointer select-none items-center text-sm text-gray-700 hover:text-black"
-      :class="{ 'font-semibold text-gray-700': modelValue !== undefined }"
-    >
-      <span v-if="!selectedUser" class="mr-0.5">
-        {{ label }}
-      </span>
-      <span v-else class="mr-0.5">
-        {{ label }}：{{ selectedUser.spec.displayName }}
-      </span>
-      <span>
-        <IconArrowDown />
-      </span>
-    </div>
-    <template #popper>
-      <div class="h-96 w-80">
-        <div class="border-b border-b-gray-100 bg-white p-4">
-          <FormKit
-            id="userFilterDropdownInput"
-            v-model="keyword"
-            :placeholder="$t('core.common.placeholder.search')"
-            type="text"
-          ></FormKit>
-        </div>
-        <div>
-          <ul
-            class="box-border h-full w-full divide-y divide-gray-100"
-            role="list"
-          >
-            <li
-              v-for="(user, index) in searchResults"
-              :key="index"
-              @click="handleSelect(user)"
-            >
-              <VEntity :is-selected="modelValue === user.metadata.name">
-                <template #start>
-                  <VEntityField>
-                    <template #description>
-                      <VAvatar
-                        :key="user.metadata.name"
-                        :alt="user.spec.displayName"
-                        :src="user.spec.avatar"
-                        size="md"
-                      ></VAvatar>
-                    </template>
-                  </VEntityField>
-                  <VEntityField
-                    :title="user.spec.displayName"
-                    :description="user.metadata.name"
-                  />
-                </template>
-              </VEntity>
-            </li>
-          </ul>
-        </div>
+  <VFilterDropdown
+    :model-value="modelValue"
+    :label="label"
+    :options="options"
+    :selected-label="selectedUser?.spec.displayName"
+    searchable
+    remote-search
+    :loading="isFetching"
+    :search-placeholder="$t('core.common.placeholder.search')"
+    :empty-text="$t('core.components.global_search.no_results')"
+    panel-width="18rem"
+    @update:model-value="handleUpdate"
+    @search="keyword = $event"
+  >
+    <template #option="{ option, selected }">
+      <VAvatar
+        size="sm"
+        circle
+        :alt="option.label"
+        :src="getUser(option)?.spec.avatar"
+        aria-hidden="true"
+      />
+      <div class="flex min-w-0 flex-1 flex-col">
+        <span
+          class="truncate text-sm group-hover:text-gray-900"
+          :class="selected ? 'font-medium text-gray-900' : 'text-gray-700'"
+        >
+          {{ option.label }}
+        </span>
+        <span
+          v-if="showUsername(option)"
+          class="truncate text-xs text-gray-500"
+        >
+          {{ option.description }}
+        </span>
       </div>
     </template>
-  </VDropdown>
+  </VFilterDropdown>
 </template>

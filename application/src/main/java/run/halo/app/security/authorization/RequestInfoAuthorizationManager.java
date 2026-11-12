@@ -2,17 +2,16 @@ package run.halo.app.security.authorization;
 
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.authorization.AuthorizationResult;
 import org.springframework.security.authorization.ReactiveAuthorizationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.server.authorization.AuthorizationContext;
 import reactor.core.publisher.Mono;
-import run.halo.app.core.extension.service.RoleService;
+import run.halo.app.core.user.service.RoleService;
 
 @Slf4j
-public class RequestInfoAuthorizationManager
-        implements ReactiveAuthorizationManager<AuthorizationContext> {
+public class RequestInfoAuthorizationManager implements ReactiveAuthorizationManager<AuthorizationContext> {
 
     private final AuthorizationRuleResolver ruleResolver;
 
@@ -21,20 +20,20 @@ public class RequestInfoAuthorizationManager
     }
 
     @Override
-    public Mono<AuthorizationDecision> check(Mono<Authentication> authentication,
-                                             AuthorizationContext context) {
-        ServerHttpRequest request = context.getExchange().getRequest();
-        RequestInfo requestInfo = RequestInfoFactory.INSTANCE.newRequestInfo(request);
+    public Mono<AuthorizationResult> authorize(Mono<Authentication> authentication, AuthorizationContext context) {
+        var request = context.getExchange().getRequest();
+        var requestInfo = RequestInfoFactory.INSTANCE.newRequestInfo(request);
 
-        return authentication.flatMap(auth -> this.ruleResolver.visitRules(auth, requestInfo)
+        // We allow anonymous user to access some resources
+        // so we don't invoke AuthenticationTrustResolver.isAuthenticated
+        // to check if the user is authenticated
+        return authentication
+                .filter(Authentication::isAuthenticated)
+                .flatMap(auth -> ruleResolver.visitRules(auth, requestInfo))
                 .doOnNext(visitor -> showErrorMessage(visitor.getErrors()))
-                .filter(AuthorizingVisitor::isAllowed)
-                .map(visitor -> new AuthorizationDecision(isGranted(auth)))
-                .switchIfEmpty(Mono.fromSupplier(() -> new AuthorizationDecision(false))));
-    }
-
-    private boolean isGranted(Authentication authentication) {
-        return authentication != null && authentication.isAuthenticated();
+                .map(AuthorizingVisitor::isAllowed)
+                .defaultIfEmpty(false)
+                .map(AuthorizationDecision::new);
     }
 
     private void showErrorMessage(List<Throwable> errors) {
@@ -42,5 +41,4 @@ public class RequestInfoAuthorizationManager
             errors.forEach(error -> log.error("Access decision error", error));
         }
     }
-
 }

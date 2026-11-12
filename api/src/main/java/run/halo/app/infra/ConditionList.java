@@ -1,19 +1,15 @@
 package run.halo.app.infra;
 
-import java.util.AbstractCollection;
-import java.util.Deque;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Consumer;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.Nullable;
 
 /**
- * <p>This {@link ConditionList} to stores multiple {@link Condition}.</p>
- * <p>The element added after is always the first, the first to be removed is always the first to
- * be added.</p>
- * <p>The queue head is the one whose element index is 0</p>
- * Note that: this class is not thread-safe.
+ * This {@link ConditionList} to stores multiple {@link Condition}.
+ *
+ * <p>The element added after is always the first, the first to be removed is always the first to be added.
+ *
+ * <p>The queue head is the one whose element index is 0 Note that: this class is not thread-safe.
  *
  * @author guqing
  * @since 2.0.0
@@ -23,14 +19,14 @@ public class ConditionList extends AbstractCollection<Condition> {
     private final Deque<Condition> conditions = new LinkedList<>();
 
     @Override
-    public boolean add(@NonNull Condition condition) {
+    public boolean add(Condition condition) {
         if (isSame(conditions.peekFirst(), condition)) {
             return false;
         }
         return conditions.add(condition);
     }
 
-    public boolean addFirst(@NonNull Condition condition) {
+    public boolean addFirst(Condition condition) {
         if (isSame(conditions.peekFirst(), condition)) {
             return false;
         }
@@ -44,7 +40,7 @@ public class ConditionList extends AbstractCollection<Condition> {
      *
      * @param condition item to add
      */
-    public boolean addAndEvictFIFO(@NonNull Condition condition) {
+    public boolean addAndEvictFIFO(Condition condition) {
         return addAndEvictFIFO(condition, EVICT_THRESHOLD);
     }
 
@@ -54,12 +50,31 @@ public class ConditionList extends AbstractCollection<Condition> {
      *
      * @param condition item to add
      */
-    public boolean addAndEvictFIFO(@NonNull Condition condition, int evictThreshold) {
-        boolean result = this.addFirst(condition);
+    public boolean addAndEvictFIFO(Condition condition, int evictThreshold) {
+        var current = getCondition(condition.getType());
+        if (current != null) {
+            // do not update last transition time if status is not changed
+            if (Objects.equals(condition.getStatus(), current.getStatus())) {
+                condition.setLastTransitionTime(current.getLastTransitionTime());
+            }
+        }
+
+        conditions.remove(current);
+        conditions.addFirst(condition);
+
         while (conditions.size() > evictThreshold) {
             removeLast();
         }
-        return result;
+        return true;
+    }
+
+    private @Nullable Condition getCondition(String type) {
+        for (Condition condition : conditions) {
+            if (condition.getType().equals(type)) {
+                return condition;
+            }
+        }
+        return null;
     }
 
     public void remove(Condition condition) {
@@ -67,20 +82,18 @@ public class ConditionList extends AbstractCollection<Condition> {
     }
 
     /**
-     * Retrieves, but does not remove, the head of the queue represented by
-     * this deque (in other words, the first element of this deque), or
-     * returns {@code null} if this deque is empty.
+     * Retrieves, but does not remove, the head of the queue represented by this deque (in other words, the first
+     * element of this deque), or returns {@code null} if this deque is empty.
      *
      * <p>This method is equivalent to {@link #peekFirst()}.
      *
-     * @return the head of the queue represented by this deque, or
-     * {@code null} if this deque is empty
+     * @return the head of the queue represented by this deque, or {@code null} if this deque is empty
      */
-    public Condition peek() {
+    public @Nullable Condition peek() {
         return peekFirst();
     }
 
-    public Condition peekFirst() {
+    public @Nullable Condition peekFirst() {
         return conditions.peekFirst();
     }
 
@@ -97,14 +110,14 @@ public class ConditionList extends AbstractCollection<Condition> {
         return conditions.size();
     }
 
-    private boolean isSame(Condition a, Condition b) {
+    private boolean isSame(@Nullable Condition a, @Nullable Condition b) {
         if (a == null || b == null) {
             return false;
         }
         return Objects.equals(a.getType(), b.getType())
-            && Objects.equals(a.getStatus(), b.getStatus())
-            && Objects.equals(a.getReason(), b.getReason())
-            && Objects.equals(a.getMessage(), b.getMessage());
+                && Objects.equals(a.getStatus(), b.getStatus())
+                && Objects.equals(a.getReason(), b.getReason())
+                && Objects.equals(a.getMessage(), b.getMessage());
     }
 
     @Override
@@ -118,7 +131,7 @@ public class ConditionList extends AbstractCollection<Condition> {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) {
             return true;
         }

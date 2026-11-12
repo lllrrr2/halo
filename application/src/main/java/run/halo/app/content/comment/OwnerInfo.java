@@ -1,28 +1,35 @@
 package run.halo.app.content.comment;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
 import run.halo.app.core.extension.User;
 import run.halo.app.core.extension.content.Comment;
 
 /**
- * Comment owner info.
+ * Resolved comment owner summary for display.
  *
  * @author guqing
  * @since 2.0.0
  */
+@Schema(description = "Resolved owner summary for a comment or reply.")
 @Value
 @Builder
 public class OwnerInfo {
 
+    /** Owner kind, such as User or email. */
     String kind;
 
+    /** Owner name. For Halo users, this is the user metadata name. */
     String name;
 
+    /** Owner display name. */
     String displayName;
 
+    /** Owner avatar URL. */
     String avatar;
 
+    /** Owner email address when available. */
     String email;
 
     /**
@@ -36,12 +43,12 @@ public class OwnerInfo {
             throw new IllegalArgumentException("Only support 'email' owner kind.");
         }
         return OwnerInfo.builder()
-            .kind(owner.getKind())
-            .name(owner.getName())
-            .email(owner.getName())
-            .displayName(owner.getDisplayName())
-            .avatar(owner.getAnnotation(Comment.CommentOwner.AVATAR_ANNO))
-            .build();
+                .kind(owner.getKind())
+                .name(owner.getName())
+                .email(owner.getName())
+                .displayName(owner.getDisplayName())
+                .avatar(owner.getAnnotation(Comment.CommentOwner.AVATAR_ANNO))
+                .build();
     }
 
     /**
@@ -52,11 +59,11 @@ public class OwnerInfo {
      */
     public static OwnerInfo from(User user) {
         return OwnerInfo.builder()
-            .kind(user.getKind())
-            .name(user.getMetadata().getName())
-            .email(user.getSpec().getEmail())
-            .avatar(user.getSpec().getAvatar())
-            .displayName(user.getSpec().getDisplayName())
-            .build();
+                .kind(user.getKind())
+                .name(user.getMetadata().getName())
+                .email(user.getSpec().getEmail())
+                .avatar(user.getSpec().getAvatar())
+                .displayName(user.getSpec().getDisplayName())
+                .build();
     }
 }

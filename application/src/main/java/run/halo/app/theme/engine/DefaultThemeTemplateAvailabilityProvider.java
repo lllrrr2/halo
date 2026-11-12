@@ -1,7 +1,7 @@
 package run.halo.app.theme.engine;
 
 import java.nio.file.Files;
-import org.springframework.boot.autoconfigure.thymeleaf.ThymeleafProperties;
+import org.springframework.boot.thymeleaf.autoconfigure.ThymeleafProperties;
 import org.springframework.stereotype.Component;
 import run.halo.app.theme.ThemeContext;
 
@@ -21,5 +21,4 @@ public class DefaultThemeTemplateAvailabilityProvider implements ThemeTemplateAv
         var path = themeContext.getPath().resolve("templates").resolve(viewName + suffix);
         return Files.exists(path);
     }
-
 }

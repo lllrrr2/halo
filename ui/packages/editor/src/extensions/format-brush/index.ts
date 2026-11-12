@@ -1,8 +1,10 @@
-import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
-import { i18n } from "@/locales";
-import { CoreEditor, Extension, Plugin, PluginKey } from "@/tiptap";
 import { markRaw } from "vue";
-import BxsBrushAlt from "~icons/bxs/brush-alt";
+import MingcuteBrush3Line from "~icons/mingcute/brush-3-line";
+import ToolbarItem from "@/components/toolbar/ToolbarItem.vue";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
+import { i18n } from "@/locales";
+import { Editor, Extension, Plugin, PluginKey } from "@/tiptap";
+import type { ExtensionOptions } from "@/types";
 import { getMarksByFirstTextNode, setMarks } from "./util";
 
 declare module "@/tiptap" {
@@ -14,16 +16,22 @@ declare module "@/tiptap" {
   }
 }
 
-export interface FormatBrushStore {
+export interface ExtensionFormatBrushStore {
   formatBrush: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   formatBrushMarks: any[];
 }
 
-const formatBrush = Extension.create<any, FormatBrushStore>({
+export const ExtensionFormatBrush = Extension.create<
+  ExtensionOptions,
+  ExtensionFormatBrushStore
+>({
+  name: "formatBrush",
+
   addOptions() {
     return {
       ...this.parent?.(),
-      getToolbarItems({ editor }: { editor: CoreEditor }) {
+      getToolbarItems({ editor }: { editor: Editor }) {
         const formatBrush =
           editor.view.dom.classList.contains("format-brush-mode");
         return {
@@ -32,7 +40,7 @@ const formatBrush = Extension.create<any, FormatBrushStore>({
           props: {
             editor,
             isActive: formatBrush,
-            icon: markRaw(BxsBrushAlt),
+            icon: markRaw(MingcuteBrush3Line),
             title: formatBrush
               ? i18n.global.t(
                   "editor.extensions.format_brush.toolbar_item.cancel"
@@ -40,6 +48,7 @@ const formatBrush = Extension.create<any, FormatBrushStore>({
               : i18n.global.t(
                   "editor.extensions.format_brush.toolbar_item.title"
                 ),
+            shortcutId: "editor.format.formatBrush",
             action: () => {
               if (formatBrush) {
                 editor.commands.pasteFormatBrush();
@@ -108,13 +117,19 @@ const formatBrush = Extension.create<any, FormatBrushStore>({
   },
 
   addKeyboardShortcuts() {
-    return {
-      "Shift-Mod-c": () => {
-        this.editor.commands.copyFormatBrush();
-        return true;
+    return defineHaloKeyboardShortcuts(this, [
+      {
+        id: "editor.format.formatBrush",
+        keys: ["Shift-Mod-s"],
+        label: () =>
+          i18n.global.t("editor.extensions.format_brush.toolbar_item.title"),
+        category: "formatting",
+        priority: 130,
+        command: () => {
+          this.editor.commands.copyFormatBrush();
+          return true;
+        },
       },
-    };
+    ]);
   },
 });
-
-export default formatBrush;

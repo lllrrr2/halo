@@ -1,33 +1,16 @@
 <script lang="ts" setup>
-import {
-  VModal,
-  VSpace,
-  VButton,
-  IconMotionLine,
-  Toast,
-  VDropdown,
-} from "@halo-dev/components";
-import SubmitButton from "@/components/button/SubmitButton.vue";
-import type {
-  ListedComment,
-  ListedReply,
-  ReplyRequest,
-} from "@halo-dev/api-client";
-// @ts-ignore
-import { Picker } from "emoji-mart";
-import i18n from "@emoji-mart/data/i18n/zh.json";
-import { computed, nextTick, ref, watch, watchEffect } from "vue";
-import { reset } from "@formkit/core";
-import { cloneDeep } from "lodash-es";
-import { setFocus } from "@/formkit/utils/focus";
-import { apiClient } from "@/utils/api-client";
+import type { ListedComment, ListedReply } from "@halo-dev/api-client";
+import { consoleApiClient } from "@halo-dev/api-client";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { ref } from "vue";
 import { useI18n } from "vue-i18n";
+import SubmitButton from "@/components/button/SubmitButton.vue";
+import CommentEditor from "./CommentEditor.vue";
 
 const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
-    visible?: boolean;
     comment?: ListedComment;
     reply?: ListedReply;
   }>(),
@@ -39,76 +22,31 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  (event: "update:visible", visible: boolean): void;
   (event: "close"): void;
 }>();
 
-const initialFormState: ReplyRequest = {
-  raw: "",
-  content: "",
-  allowNotification: true,
-  quoteReply: undefined,
-};
+const modal = ref<InstanceType<typeof VModal> | null>(null);
+const isSubmitting = ref(false);
+const characterCount = ref(0);
+const content = ref("");
+const hidden = ref(false);
 
-const formState = ref<ReplyRequest>(cloneDeep(initialFormState));
-const saving = ref(false);
-
-watch(
-  () => formState.value.raw,
-  (newValue) => {
-    formState.value.content = newValue;
-  }
-);
-
-const formId = computed(() => {
-  return `comment-reply-form-${[
-    props.comment?.comment.metadata.name,
-    props.reply?.reply.metadata.name,
-  ].join("-")}`;
-});
-
-const contentInputId = computed(() => {
-  return `content-input-${[
-    props.comment?.comment.metadata.name,
-    props.reply?.reply.metadata.name,
-  ].join("-")}`;
-});
-
-const onVisibleChange = (visible: boolean) => {
-  emit("update:visible", visible);
-  if (!visible) {
-    emit("close");
-  }
-};
-
-const handleResetForm = () => {
-  formState.value = cloneDeep(initialFormState);
-  reset(formId.value);
-};
-
-watch(
-  () => props.visible,
-  async (visible) => {
-    if (visible) {
-      await nextTick();
-      setFocus(contentInputId.value);
-    } else {
-      handleResetForm();
-    }
-  }
-);
-
-const handleCreateReply = async () => {
+const handleSubmit = async () => {
   try {
-    saving.value = true;
-    if (props.reply) {
-      formState.value.quoteReply = props.reply.reply.metadata.name;
-    }
-    await apiClient.comment.createReply({
+    isSubmitting.value = true;
+
+    await consoleApiClient.content.comment.createReply({
       name: props.comment?.comment.metadata.name as string,
-      replyRequest: formState.value,
+      replyRequest: {
+        raw: content.value,
+        content: content.value,
+        allowNotification: true,
+        hidden: hidden.value,
+        quoteReply: props.reply?.reply.metadata.name,
+      },
     });
-    onVisibleChange(false);
+
+    modal.value?.close();
 
     Toast.success(
       t("core.comment.reply_modal.operations.submit.toast_success")
@@ -116,83 +54,46 @@ const handleCreateReply = async () => {
   } catch (error) {
     console.error("Failed to create comment reply", error);
   } finally {
-    saving.value = false;
+    isSubmitting.value = false;
   }
 };
 
-// Emoji picker
-const emojiPickerRef = ref<HTMLElement | null>(null);
-
-const handleCreateEmojiPicker = () => {
-  const emojiPicker = new Picker({
-    data: async () => {
-      const data = await import("@emoji-mart/data");
-      return Object.assign({}, data);
-    },
-    theme: "light",
-    autoFocus: true,
-    i18n: i18n,
-    onEmojiSelect: onEmojiSelect,
-  });
-  emojiPickerRef.value?.appendChild(emojiPicker as unknown as Node);
-};
-
-const onEmojiSelect = (emoji: { native: string }) => {
-  formState.value.raw += emoji.native;
-  setFocus(contentInputId.value);
-};
-
-watchEffect(() => {
-  if (emojiPickerRef.value) {
-    handleCreateEmojiPicker();
-  }
-});
+function onUpdate(value: { content: string; characterCount: number }) {
+  content.value = value.content;
+  characterCount.value = value.characterCount;
+}
 </script>
 
 <template>
   <VModal
+    ref="modal"
     :title="$t('core.comment.reply_modal.title')"
-    :visible="visible"
-    :width="500"
-    @update:visible="onVisibleChange"
+    :width="600"
+    :mount-to-body="true"
+    :centered="false"
+    @close="emit('close')"
   >
-    <FormKit
-      :id="formId"
-      :name="formId"
-      type="form"
-      :config="{ validationVisibility: 'submit' }"
-      @submit="handleCreateReply"
-    >
+    <div>
+      <CommentEditor :auto-focus="true" @update="onUpdate" />
       <FormKit
-        :id="contentInputId"
-        v-model="formState.raw"
-        type="textarea"
-        :validation-label="$t('core.comment.reply_modal.fields.content.label')"
-        :rows="6"
-        validation="required|length:0,1024"
-      ></FormKit>
-    </FormKit>
-    <div class="mt-2 flex justify-end">
-      <VDropdown :classes="['!p-0']">
-        <IconMotionLine
-          class="h-5 w-5 cursor-pointer text-gray-500 transition-all hover:text-gray-900"
-        />
-        <template #popper>
-          <div ref="emojiPickerRef"></div>
-        </template>
-      </VDropdown>
+        v-model="hidden"
+        type="checkbox"
+        :label="$t('core.comment.reply_modal.fields.private.label')"
+        :help="$t('core.comment.reply_modal.fields.private.help')"
+        outer-class="mt-3"
+      />
     </div>
     <template #footer>
       <VSpace>
         <SubmitButton
-          v-if="visible"
-          :loading="saving"
+          :loading="isSubmitting"
           type="secondary"
           :text="$t('core.common.buttons.submit')"
-          @submit="$formkit.submit(formId)"
+          :disabled="characterCount === 0"
+          @submit="handleSubmit"
         >
         </SubmitButton>
-        <VButton @click="onVisibleChange(false)">
+        <VButton @click="modal?.close()">
           {{ $t("core.common.buttons.cancel_and_shortcut") }}
         </VButton>
       </VSpace>

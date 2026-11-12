@@ -15,7 +15,7 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.reactive.result.view.ViewResolver;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.SystemConfigurableEnvironmentFetcher;
+import run.halo.app.infra.SystemConfigFetcher;
 import run.halo.app.infra.SystemSetting;
 import run.halo.app.theme.router.EmptyView;
 
@@ -28,24 +28,23 @@ import run.halo.app.theme.router.EmptyView;
 @ExtendWith(MockitoExtension.class)
 abstract class RouteFactoryTestSuite {
     @Mock
-    protected SystemConfigurableEnvironmentFetcher environmentFetcher;
+    protected SystemConfigFetcher environmentFetcher;
+
     @Mock
     protected ViewResolver viewResolver;
 
     @BeforeEach
     final void setUpParent() throws URISyntaxException {
-        lenient().when(environmentFetcher.fetchPost())
-            .thenReturn(Mono.just(new SystemSetting.Post()));
-        lenient().when(environmentFetcher.fetch(eq(SystemSetting.ThemeRouteRules.GROUP),
-            eq(SystemSetting.ThemeRouteRules.class))).thenReturn(Mono.just(getThemeRouteRules()));
-        lenient().when(viewResolver.resolveViewName(any(), any()))
-            .thenReturn(Mono.just(new EmptyView()));
+        lenient().when(environmentFetcher.fetchPost()).thenReturn(Mono.just(new SystemSetting.Post()));
+        lenient()
+                .when(environmentFetcher.fetch(
+                        eq(SystemSetting.ThemeRouteRules.GROUP), eq(SystemSetting.ThemeRouteRules.class)))
+                .thenReturn(Mono.just(getThemeRouteRules()));
+        lenient().when(viewResolver.resolveViewName(any(), any())).thenReturn(Mono.just(new EmptyView()));
         setUp();
     }
 
-    public void setUp() {
-
-    }
+    public void setUp() {}
 
     public SystemSetting.ThemeRouteRules getThemeRouteRules() {
         SystemSetting.ThemeRouteRules themeRouteRules = new SystemSetting.ThemeRouteRules();
@@ -58,9 +57,8 @@ abstract class RouteFactoryTestSuite {
 
     public WebTestClient getWebTestClient(RouterFunction<ServerResponse> routeFunction) {
         return WebTestClient.bindToRouterFunction(routeFunction)
-            .handlerStrategies(HandlerStrategies.builder()
-                .viewResolver(viewResolver)
-                .build())
-            .build();
+                .handlerStrategies(
+                        HandlerStrategies.builder().viewResolver(viewResolver).build())
+                .build();
     }
 }

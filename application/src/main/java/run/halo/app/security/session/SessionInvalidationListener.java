@@ -1,5 +1,6 @@
 package run.halo.app.security.session;
 
+import java.time.Duration;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
@@ -10,13 +11,15 @@ import org.springframework.session.Session;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import run.halo.app.event.user.PasswordChangedEvent;
+import run.halo.app.infra.utils.ReactiveUtils;
 
 @Component
 @RequiredArgsConstructor
 public class SessionInvalidationListener {
 
-    private final ReactiveFindByIndexNameSessionRepository<? extends Session>
-        indexedSessionRepository;
+    private static final Duration BLOCKING_TIMEOUT = ReactiveUtils.DEFAULT_TIMEOUT;
+
+    private final ReactiveFindByIndexNameSessionRepository<? extends Session> indexedSessionRepository;
     private final ReactiveSessionRepository<? extends Session> sessionRepository;
 
     @Async
@@ -28,11 +31,12 @@ public class SessionInvalidationListener {
     }
 
     private void invalidateUserSessions(String username) {
-        indexedSessionRepository.findByPrincipalName(username)
-            .map(Map::keySet)
-            .flatMapMany(Flux::fromIterable)
-            .flatMap(sessionRepository::deleteById)
-            .then()
-            .block();
+        indexedSessionRepository
+                .findByPrincipalName(username)
+                .map(Map::keySet)
+                .flatMapMany(Flux::fromIterable)
+                .flatMap(sessionRepository::deleteById)
+                .then()
+                .block(BLOCKING_TIMEOUT);
     }
 }

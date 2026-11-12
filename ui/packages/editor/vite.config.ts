@@ -1,22 +1,68 @@
-import { fileURLToPath, URL } from "node:url";
-
-import { defineConfig } from "vite";
-import Vue from "@vitejs/plugin-vue";
-import Icons from "unplugin-icons/vite";
 import path from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
+import Vue from "@vitejs/plugin-vue";
+import dts from "unplugin-dts/vite";
+import Icons from "unplugin-icons/vite";
+import { defineConfig } from "vite-plus";
 
-export default defineConfig({
-  plugins: [
-    Vue(),
-    Icons({ compiler: "vue3" }),
-    VueI18nPlugin({
-      include: [path.resolve(__dirname, "./src/locales/*.yaml")],
-    }),
-  ],
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+export default ({ mode }: { mode: string }) => {
+  const isProduction = mode === "production";
+
+  return defineConfig({
+    plugins: [
+      Vue(),
+      Icons({
+        compiler: "vue3",
+      }),
+      isProduction &&
+        dts({
+          processor: "vue",
+          tsconfigPath: "./tsconfig.app.json",
+          entryRoot: "./src",
+          outDirs: "./dist",
+          insertTypesEntry: true,
+        }),
+      VueI18nPlugin({
+        include: [path.resolve(__dirname, "./src/locales/*.json")],
+      }),
+    ],
+    define: {
+      "process.env.NODE_ENV": '"production"',
     },
-  },
-});
+    resolve: {
+      alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+      },
+    },
+    build: {
+      outDir: path.resolve(__dirname, "dist"),
+      lib: {
+        entry: path.resolve(__dirname, "src/index.ts"),
+        name: "RichTextEditor",
+        formats: ["es", "iife"],
+        fileName: (format) => `index.${format}.js`,
+        cssFileName: "style",
+      },
+      minify: isProduction,
+      rollupOptions: {
+        external: [
+          "vue",
+          "@halo-dev/ui-shared",
+          "@halo-dev/api-client",
+          "@halo-dev/components",
+        ],
+        output: {
+          globals: {
+            vue: "Vue",
+            "@halo-dev/ui-shared": "HaloUiShared",
+            "@halo-dev/api-client": "HaloApiClient",
+            "@halo-dev/components": "HaloComponents",
+          },
+          exports: "named",
+        },
+      },
+      sourcemap: false,
+    },
+  });
+};

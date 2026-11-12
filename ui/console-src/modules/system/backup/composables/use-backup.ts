@@ -1,22 +1,28 @@
-import { apiClient } from "@/utils/api-client";
+import {
+  BackupStatusPhaseEnum,
+  coreApiClient,
+  paginate,
+  type Backup,
+  type BackupV1alpha1ApiListBackupRequest,
+} from "@halo-dev/api-client";
 import { Dialog, Toast } from "@halo-dev/components";
+import { utils } from "@halo-dev/ui-shared";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
-import dayjs from "dayjs";
-import { BackupStatusPhaseEnum } from "@halo-dev/api-client";
 import { useI18n } from "vue-i18n";
 
 export function useBackupFetch() {
   return useQuery({
     queryKey: ["backups"],
     queryFn: async () => {
-      const { data } =
-        await apiClient.extension.backup.listmigrationHaloRunV1alpha1Backup({
-          sort: ["metadata.creationTimestamp,desc"],
-        });
-      return data;
+      return await paginate<BackupV1alpha1ApiListBackupRequest, Backup>(
+        (params) => coreApiClient.migration.backup.listBackup(params),
+        {
+          size: 1000,
+        }
+      );
     },
     refetchInterval(data) {
-      const deletingBackups = data?.items.filter((backup) => {
+      const deletingBackups = data?.filter((backup) => {
         return !!backup.metadata.deletionTimestamp;
       });
 
@@ -24,7 +30,7 @@ export function useBackupFetch() {
         return 1000;
       }
 
-      const pendingBackups = data?.items.filter((backup) => {
+      const pendingBackups = data?.filter((backup) => {
         return (
           backup.status?.phase === BackupStatusPhaseEnum.Pending ||
           backup.status?.phase === BackupStatusPhaseEnum.Running
@@ -51,7 +57,7 @@ export function useBackup() {
       confirmText: t("core.common.buttons.confirm"),
       cancelText: t("core.common.buttons.cancel"),
       async onConfirm() {
-        await apiClient.extension.backup.createmigrationHaloRunV1alpha1Backup({
+        await coreApiClient.migration.backup.createBackup({
           backup: {
             apiVersion: "migration.halo.run/v1alpha1",
             kind: "Backup",
@@ -60,7 +66,7 @@ export function useBackup() {
               name: "",
             },
             spec: {
-              expiresAt: dayjs().add(7, "day").toISOString(),
+              expiresAt: utils.date.dayjs().add(7, "day").toISOString(),
             },
           },
         });

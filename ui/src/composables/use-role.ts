@@ -1,11 +1,9 @@
 import type { Role } from "@halo-dev/api-client";
-import { onUnmounted, type ComputedRef, type Ref } from "vue";
-import { computed, onMounted, ref } from "vue";
-import { roleLabels } from "@/constants/labels";
-import { rbacAnnotations } from "@/constants/annotations";
-import { apiClient } from "@/utils/api-client";
+import { coreApiClient } from "@halo-dev/api-client";
 import { Toast } from "@halo-dev/components";
+import { computed, ref, type ComputedRef, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { rbacAnnotations } from "@/constants/annotations";
 import { resolveDeepDependencies } from "@/utils/role";
 
 interface RoleTemplateGroup {
@@ -13,31 +11,9 @@ interface RoleTemplateGroup {
   roles: Role[];
 }
 
-const initialFormState: Role = {
-  apiVersion: "v1alpha1",
-  kind: "Role",
-  metadata: {
-    name: "",
-    generateName: "role-",
-    labels: {},
-    annotations: {
-      [rbacAnnotations.DEPENDENCIES]: "",
-      [rbacAnnotations.DISPLAY_NAME]: "",
-    },
-  },
-  rules: [],
-};
-
-interface useFetchRoleReturn {
-  roles: Ref<Role[]>;
-  loading: Ref<boolean>;
-  handleFetchRoles: () => void;
-}
-
 interface useRoleFormReturn {
   formState: Ref<Role>;
-  initialFormState: Role;
-  saving: Ref<boolean>;
+  isSubmitting: Ref<boolean>;
   isUpdateMode: ComputedRef<boolean>;
   handleCreateOrUpdate: () => Promise<void>;
 }
@@ -49,60 +25,6 @@ interface useRoleTemplateSelectionReturn {
 }
 
 /**
- * Fetch all roles(without role templates) from the API.
- *
- * @returns {useFetchRoleReturn}
- */
-export function useFetchRole(): useFetchRoleReturn {
-  const roles = ref<Role[]>([]);
-  const loading = ref(false);
-  const refreshInterval = ref();
-
-  const handleFetchRoles = async (options?: { mute?: boolean }) => {
-    try {
-      clearInterval(refreshInterval.value);
-
-      if (!options?.mute) {
-        loading.value = true;
-      }
-
-      const { data } = await apiClient.extension.role.listv1alpha1Role({
-        page: 0,
-        size: 0,
-        labelSelector: [`!${roleLabels.TEMPLATE}`],
-      });
-      roles.value = data.items;
-
-      const deletedRoles = roles.value.filter(
-        (role) => !!role.metadata.deletionTimestamp
-      );
-
-      if (deletedRoles.length) {
-        refreshInterval.value = setInterval(() => {
-          handleFetchRoles({ mute: true });
-        }, 1000);
-      }
-    } catch (e) {
-      console.error("Failed to fetch roles", e);
-    } finally {
-      loading.value = false;
-    }
-  };
-
-  onMounted(handleFetchRoles);
-
-  onUnmounted(() => {
-    clearInterval(refreshInterval.value);
-  });
-
-  return {
-    roles,
-    loading,
-    handleFetchRoles,
-  };
-}
-
-/**
  * Create or update a role.
  *
  * @returns {useRoleFormReturn}
@@ -110,8 +32,21 @@ export function useFetchRole(): useFetchRoleReturn {
 export function useRoleForm(): useRoleFormReturn {
   const { t } = useI18n();
 
-  const formState = ref<Role>(initialFormState);
-  const saving = ref(false);
+  const formState = ref<Role>({
+    apiVersion: "v1alpha1",
+    kind: "Role",
+    metadata: {
+      name: "",
+      generateName: "role-",
+      labels: {},
+      annotations: {
+        [rbacAnnotations.DEPENDENCIES]: "",
+        [rbacAnnotations.DISPLAY_NAME]: "",
+      },
+    },
+    rules: [],
+  });
+  const isSubmitting = ref(false);
 
   const isUpdateMode = computed(() => {
     return !!formState.value.metadata.creationTimestamp;
@@ -119,16 +54,16 @@ export function useRoleForm(): useRoleFormReturn {
 
   const handleCreateOrUpdate = async () => {
     try {
-      saving.value = true;
+      isSubmitting.value = true;
       if (isUpdateMode.value) {
-        const { data } = await apiClient.extension.role.updatev1alpha1Role({
+        const { data } = await coreApiClient.role.updateRole({
           name: formState.value.metadata.name,
           role: formState.value,
         });
 
         formState.value = data;
       } else {
-        const { data } = await apiClient.extension.role.createv1alpha1Role({
+        const { data } = await coreApiClient.role.createRole({
           role: formState.value,
         });
 
@@ -139,14 +74,13 @@ export function useRoleForm(): useRoleFormReturn {
     } catch (e) {
       console.error(e);
     } finally {
-      saving.value = false;
+      isSubmitting.value = false;
     }
   };
 
   return {
     formState,
-    initialFormState,
-    saving,
+    isSubmitting,
     isUpdateMode,
     handleCreateOrUpdate,
   };

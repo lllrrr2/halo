@@ -35,6 +35,9 @@ public class CommentVo implements ExtensionVoOperator {
     @Schema(requiredMode = REQUIRED)
     private CommentStatsVo stats;
 
+    @Schema(description = "Frontend permalink to this comment, when its subject URL is available.")
+    private String permalink;
+
     /**
      * Convert {@link Comment} to {@link CommentVo}.
      *
@@ -43,8 +46,8 @@ public class CommentVo implements ExtensionVoOperator {
      */
     public static CommentVo from(Comment comment) {
         return new CommentVo()
-            .setMetadata(comment.getMetadata())
-            .setSpec(comment.getSpec())
-            .setStatus(comment.getStatus());
+                .setMetadata(comment.getMetadata())
+                .setSpec(comment.getSpec())
+                .setStatus(comment.getStatus());
     }
 }

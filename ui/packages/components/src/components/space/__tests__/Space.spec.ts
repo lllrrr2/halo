@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { VSpace } from "../index";
 import { mount } from "@vue/test-utils";
-import { SpacingSize } from "../interface";
+import { describe, expect, it } from "vite-plus/test";
+import { VSpace } from "../index";
+import { SpaceSpacingSize } from "../types";
 
 describe("Space", () => {
   it("should render", function () {
@@ -9,14 +9,14 @@ describe("Space", () => {
   });
 
   it("should work with spacing prop", function () {
-    Object.keys(SpacingSize).forEach((key: string) => {
+    Object.keys(SpaceSpacingSize).forEach((key: string) => {
       const wrapper = mount(VSpace, {
         propsData: {
           spacing: key,
         },
       });
       expect(wrapper.attributes()["style"]).toContain(
-        `gap: ${SpacingSize[key]}px`
+        `gap: ${SpaceSpacingSize[key]}px`
       );
       wrapper.unmount();
     });

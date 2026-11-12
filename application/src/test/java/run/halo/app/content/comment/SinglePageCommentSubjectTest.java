@@ -1,19 +1,22 @@
 package run.halo.app.content.comment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import run.halo.app.core.extension.content.Constant;
 import run.halo.app.core.extension.content.SinglePage;
 import run.halo.app.extension.FakeExtension;
 import run.halo.app.extension.Metadata;
@@ -36,26 +39,43 @@ class SinglePageCommentSubjectTest {
 
     @Test
     void get() {
-        when(client.fetch(eq(SinglePage.class), any()))
-            .thenReturn(Mono.empty());
+        when(client.fetch(eq(SinglePage.class), any())).thenReturn(Mono.empty());
 
         SinglePage singlePage = new SinglePage();
         singlePage.setMetadata(new Metadata());
         singlePage.getMetadata().setName("fake-single-page");
 
-        when(client.fetch(eq(SinglePage.class), eq("fake-single-page")))
-            .thenReturn(Mono.just(singlePage));
+        when(client.fetch(eq(SinglePage.class), eq("fake-single-page"))).thenReturn(Mono.just(singlePage));
 
-        singlePageCommentSubject.get("fake-single-page")
-            .as(StepVerifier::create)
-            .expectNext(singlePage)
-            .verifyComplete();
+        singlePageCommentSubject
+                .get("fake-single-page")
+                .as(StepVerifier::create)
+                .expectNext(singlePage)
+                .verifyComplete();
 
-        singlePageCommentSubject.get("fake-single-page-2")
-            .as(StepVerifier::create)
-            .verifyComplete();
+        singlePageCommentSubject
+                .get("fake-single-page-2")
+                .as(StepVerifier::create)
+                .verifyComplete();
 
         verify(client, times(1)).fetch(eq(SinglePage.class), eq("fake-single-page"));
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"/archives/example?lang=zh", "https://example.test/archives/example?lang=zh"})
+    void subjectDisplayPreservesStoredPermalink(String permalink) {
+        var subject = new SinglePage();
+        subject.setSpec(new SinglePage.SinglePageSpec());
+        subject.getSpec().setTitle("Subject");
+        subject.getStatusOrDefault().setPermalink(permalink);
+        when(client.fetch(SinglePage.class, "subject")).thenReturn(Mono.just(subject));
+
+        singlePageCommentSubject
+                .getSubjectDisplay("subject")
+                .as(StepVerifier::create)
+                .expectNext(new CommentSubject.SubjectDisplay("Subject", permalink, "页面"))
+                .verifyComplete();
     }
 
     @Test
@@ -71,5 +91,14 @@ class SinglePageCommentSubjectTest {
         fakeExtension.getMetadata().setName("test");
         supports = singlePageCommentSubject.supports(Ref.of(fakeExtension));
         assertThat(supports).isFalse();
+    }
+
+    @Test
+    void shouldSupportRefWithoutVersion() {
+        var ref = new Ref();
+        ref.setName("fake-post");
+        ref.setGroup(Constant.GROUP);
+        ref.setKind(SinglePage.KIND);
+        assertTrue(singlePageCommentSubject.supports(ref));
     }
 }

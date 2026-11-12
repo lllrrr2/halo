@@ -2,17 +2,22 @@ package run.halo.app.extension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static run.halo.app.extension.MetadataOperator.metadataDeepEquals;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import org.json.JSONException;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.skyscreamer.jsonassert.JSONAssert;
+import org.springframework.test.json.JsonAssert;
+import org.springframework.test.json.JsonCompareMode;
+import tools.jackson.databind.json.JsonMapper;
 
 class UnstructuredTest {
 
@@ -72,7 +77,7 @@ class UnstructuredTest {
 
         assertEquals("fake.halo.run/v1alpha1", extension.getApiVersion());
         assertEquals("Fake", extension.getKind());
-        metadataDeepEquals(createMetadata(), extension.getMetadata());
+        MetadataOperator.equals(createMetadata(), extension.getMetadata());
     }
 
     @Test
@@ -81,7 +86,7 @@ class UnstructuredTest {
 
         assertEquals("fake.halo.run/v1alpha1", extension.getApiVersion());
         assertEquals("Fake", extension.getKind());
-        assertTrue(metadataDeepEquals(createMetadata(), extension.getMetadata()));
+        assertTrue(MetadataOperator.equals(createMetadata(), extension.getMetadata()));
     }
 
     @Test
@@ -98,10 +103,113 @@ class UnstructuredTest {
     }
 
     @Test
-    void shouldGetFinalizersCorrectly() throws JsonProcessingException, JSONException {
+    void shouldGetFinalizersCorrectly() throws JsonProcessingException {
         var extension = objectMapper.readValue(extensionJson, Unstructured.class);
 
-        assertEquals(Set.of("finalizer.1", "finalizer.2"), extension.getMetadata().getFinalizers());
+        assertEquals(
+                Set.of("finalizer.1", "finalizer.2"), extension.getMetadata().getFinalizers());
+
+        extension.getMetadata().setFinalizers(Set.of("finalizer.3", "finalizer.4"));
+        assertEquals(
+                Set.of("finalizer.3", "finalizer.4"), extension.getMetadata().getFinalizers());
+    }
+
+    @Test
+    void shouldSetLabelsCorrectly() throws JsonProcessingException {
+        var extension = objectMapper.readValue(extensionJson, Unstructured.class);
+
+        assertEquals(
+                Map.of("category", "fake", "default", "true"),
+                extension.getMetadata().getLabels());
+
+        extension.getMetadata().setLabels(Map.of("category", "fake", "default", "false"));
+        assertEquals(
+                Map.of("category", "fake", "default", "false"),
+                extension.getMetadata().getLabels());
+    }
+
+    @Test
+    void shouldSetAnnotationsCorrectly() throws JsonProcessingException {
+        var extension = objectMapper.readValue(extensionJson, Unstructured.class);
+
+        assertNull(extension.getMetadata().getAnnotations());
+
+        extension.getMetadata().setAnnotations(Map.of("annotation1", "value1", "annotation2", "value2"));
+        assertEquals(
+                Map.of("annotation1", "value1", "annotation2", "value2"),
+                extension.getMetadata().getAnnotations());
+    }
+
+    @Nested
+    class JacksonJson3Test {
+
+        JsonMapper jsonMapper = JsonMapper.shared();
+
+        @Test
+        void shouldSerializeCorrectly() {
+            var json = """
+                {
+                    "apiVersion": "fake.halo.run/v1alpha1",
+                    "kind": "Fake",
+                    "metadata": {
+                        "labels": {
+                            "category": "fake",
+                            "default": "true"
+                        },
+                        "name": "fake-extension",
+                        "creationTimestamp": "2011-12-03T10:15:30Z",
+                        "version": 12345
+                    },
+                    "spec": {
+                        "field1": "value1",
+                        "field2": 2
+                    }
+                }
+                """;
+            var unstructured = jsonMapper.readValue(json, Unstructured.class);
+            assertEquals("fake-extension", unstructured.getMetadata().getName());
+            assertEquals("fake.halo.run/v1alpha1", unstructured.getApiVersion());
+            assertEquals("Fake", unstructured.getKind());
+            assertEquals("fake", unstructured.getMetadata().getLabels().get("category"));
+            assertEquals("true", unstructured.getMetadata().getLabels().get("default"));
+            assertEquals(
+                    Instant.parse("2011-12-03T10:15:30Z"),
+                    unstructured.getMetadata().getCreationTimestamp());
+            assertEquals(12345L, unstructured.getMetadata().getVersion());
+
+            var field1 = Unstructured.getNestedValue(unstructured.getData(), "spec", "field1")
+                    .orElse(null);
+            var field2 = Unstructured.getNestedValue(unstructured.getData(), "spec", "field2")
+                    .orElse(null);
+            assertEquals("value1", field1);
+            assertEquals(2, field2);
+        }
+
+        @Test
+        void shouldDeserializeCorrectly() {
+            var u = new Unstructured();
+            u.setApiVersion("fake.halo.run/v1alpha1");
+            u.setKind("Fake");
+            var metadata = new Metadata();
+            metadata.setName("fake-extension");
+            u.setMetadata(metadata);
+            Unstructured.setNestedValue(u.getData(), new HashMap<>(), "spec");
+            Unstructured.setNestedValue(u.getData(), "value1", "spec", "field1");
+
+            var json = jsonMapper.writeValueAsString(u);
+            JsonAssert.comparator(JsonCompareMode.STRICT).assertIsMatch("""
+                {
+                    "apiVersion": "fake.halo.run/v1alpha1",
+                    "kind": "Fake",
+                    "metadata": {
+                        "name": "fake-extension"
+                    },
+                    "spec": {
+                        "field1": "value1"
+                    }
+                }
+                """, json);
+        }
     }
 
     Unstructured createUnstructured() {
@@ -120,5 +228,4 @@ class UnstructuredTest {
         metadata.setVersion(12345L);
         return metadata;
     }
-
 }

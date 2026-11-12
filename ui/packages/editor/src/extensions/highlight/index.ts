@@ -1,43 +1,73 @@
-import type { Editor } from "@/tiptap/vue-3";
-import TiptapHighlight from "@tiptap/extension-highlight";
 import type { HighlightOptions } from "@tiptap/extension-highlight";
-import MdiFormatColorHighlight from "~icons/mdi/format-color-highlight";
+import TiptapHighlight from "@tiptap/extension-highlight";
 import { markRaw } from "vue";
+import MingcuteMarkPenLine from "~icons/mingcute/mark-pen-line";
+import { defineHaloKeyboardShortcuts } from "@/keyboard-shortcuts";
 import { i18n } from "@/locales";
+import type { Editor } from "@/tiptap";
 import type { ExtensionOptions } from "@/types";
 import HighlightToolbarItem from "./HighlightToolbarItem.vue";
 
-const Highlight = TiptapHighlight.extend<ExtensionOptions & HighlightOptions>({
-  addAttributes() {
-    if (!this.options.multicolor) {
-      return {};
-    }
+export type ExtensionHighlightOptions = ExtensionOptions &
+  Partial<HighlightOptions>;
 
-    return {
-      ...this.parent?.(),
-      style: {
-        default: "display: inline-block;",
-        parseHTML: (element) => element.getAttribute("style"),
-      },
-    };
-  },
-  addOptions() {
-    return {
-      ...this.parent?.(),
-      getToolbarItems({ editor }: { editor: Editor }) {
-        return {
-          priority: 80,
-          component: markRaw(HighlightToolbarItem),
-          props: {
-            editor,
-            isActive: editor.isActive("highlight"),
-            icon: markRaw(MdiFormatColorHighlight),
-            title: i18n.global.t("editor.common.highlight"),
+export const ExtensionHighlight =
+  TiptapHighlight.extend<ExtensionHighlightOptions>({
+    addKeyboardShortcuts() {
+      return defineHaloKeyboardShortcuts(this, [
+        {
+          id: "editor.format.highlight",
+          keys: ["Mod-Shift-h"],
+          label: () => i18n.global.t("editor.common.highlight"),
+          category: "formatting",
+          priority: 60,
+        },
+      ]);
+    },
+
+    addHaloEditorMetadata() {
+      return {
+        ai: {
+          description:
+            "Highlighted inline text with an optional background color.",
+          exposure: "available",
+          useWhen: ["Drawing attention to a short, especially notable phrase."],
+          avoidWhen: ["Highlighting large sections of text."],
+          attributeGuidance: {
+            color: {
+              description: "CSS color used as the highlight background.",
+              format: "CSS color",
+              examples: ["#fff3a3", "yellow"],
+              omitWhen: ["The default highlight color is appropriate."],
+            },
           },
-        };
-      },
-    };
-  },
-}).configure({ multicolor: true });
+          generation: {
+            mode: "direct-html",
+          },
+          examples: [
+            "<p>This is <mark>highlighted with the default color</mark>.</p>",
+            '<p>This is <mark data-color="#fff3a3" style="background-color: #fff3a3">notable</mark>.</p>',
+          ],
+        },
+      };
+    },
 
-export default Highlight;
+    addOptions() {
+      return {
+        ...this.parent?.(),
+        getToolbarItems({ editor }: { editor: Editor }) {
+          return {
+            priority: 80,
+            component: markRaw(HighlightToolbarItem),
+            props: {
+              editor,
+              isActive: editor.isActive(TiptapHighlight.name),
+              icon: markRaw(MingcuteMarkPenLine),
+              title: i18n.global.t("editor.common.highlight"),
+              shortcutId: "editor.format.highlight",
+            },
+          };
+        },
+      };
+    },
+  }).configure({ multicolor: true });

@@ -1,12 +1,13 @@
 <script lang="ts" setup>
-import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
-import PostSettingForm from "./PostSettingForm.vue";
-import type { PostFormState } from "../types";
 import type { Post } from "@halo-dev/api-client";
-import { ref } from "vue";
-import { useI18n } from "vue-i18n";
-import { toDatetimeLocal } from "@/utils/date";
+import { Toast, VButton, VModal, VSpace } from "@halo-dev/components";
+import { utils } from "@halo-dev/ui-shared";
 import { usePostUpdateMutate } from "@uc/modules/contents/posts/composables/use-post-update-mutate";
+import { nextTick, ref, useTemplateRef } from "vue";
+import { useI18n } from "vue-i18n";
+import type AnnotationsForm from "@/components/form/AnnotationsForm.vue";
+import type { PostFormState } from "../types";
+import PostSettingForm from "./PostSettingForm.vue";
 
 const { t } = useI18n();
 
@@ -22,13 +23,34 @@ const emit = defineEmits<{
   (event: "success", post: Post): void;
 }>();
 
-const modal = ref();
+const modal = ref<InstanceType<typeof VModal> | null>(null);
 
 const { mutateAsync, isLoading } = usePostUpdateMutate();
 
+const annotationsFormRef =
+  useTemplateRef<InstanceType<typeof AnnotationsForm>>("annotationsFormRef");
+
 async function onSubmit(data: PostFormState) {
+  annotationsFormRef.value?.handleSubmit();
+  await nextTick();
+
+  const { customAnnotations, annotations, customFormInvalid, specFormInvalid } =
+    annotationsFormRef.value || {};
+
+  if (customFormInvalid || specFormInvalid) {
+    return;
+  }
+
   const postToUpdate: Post = {
     ...props.post,
+    metadata: {
+      ...props.post.metadata,
+      annotations: {
+        ...(props.post.metadata.annotations || {}),
+        ...annotations,
+        ...customAnnotations,
+      },
+    },
     spec: {
       ...props.post.spec,
       allowComment: data.allowComment,
@@ -38,7 +60,6 @@ async function onSubmit(data: PostFormState) {
         autoGenerate: data.excerptAutoGenerate,
         raw: data.excerptRaw,
       },
-      pinned: data.pinned,
       publishTime: data.publishTime,
       slug: data.slug,
       tags: data.tags,
@@ -51,7 +72,7 @@ async function onSubmit(data: PostFormState) {
 
   Toast.success(t("core.common.toast.save_success"));
   emit("success", newPost);
-  modal.value.close();
+  modal.value?.close();
 }
 </script>
 
@@ -65,23 +86,47 @@ async function onSubmit(data: PostFormState) {
   >
     <PostSettingForm
       :form-state="{
-        title: props.post.spec.title,
-        slug: props.post.spec.slug,
-        cover: props.post.spec.cover,
-        categories: props.post.spec.categories,
-        tags: props.post.spec.tags,
-        allowComment: props.post.spec.allowComment,
-        visible: props.post.spec.visible,
-        pinned: props.post.spec.pinned,
-        publishTime: props.post.spec.publishTime
-          ? toDatetimeLocal(props.post.spec.publishTime)
+        title: post.spec.title,
+        slug: post.spec.slug,
+        cover: post.spec.cover,
+        categories: post.spec.categories,
+        tags: post.spec.tags,
+        allowComment: post.spec.allowComment,
+        visible: post.spec.visible,
+        publishTime: post.spec.publishTime
+          ? utils.date.toDatetimeLocal(post.spec.publishTime)
           : undefined,
-        excerptAutoGenerate: props.post.spec.excerpt.autoGenerate,
-        excerptRaw: props.post.spec.excerpt.raw,
+        excerptAutoGenerate: post.spec.excerpt.autoGenerate,
+        excerptRaw: post.spec.excerpt.raw,
       }"
+      :name="post.metadata.name"
       update-mode
       @submit="onSubmit"
     />
+
+    <div class="py-5">
+      <div class="border-t border-gray-200"></div>
+    </div>
+
+    <div class="md:grid md:grid-cols-4 md:gap-6">
+      <div class="md:col-span-1">
+        <div class="sticky top-0">
+          <span class="text-base font-medium text-gray-900">
+            {{ $t("core.post.settings.groups.annotations") }}
+          </span>
+        </div>
+      </div>
+      <div class="mt-5 divide-y divide-gray-100 md:col-span-3 md:mt-0">
+        <AnnotationsForm
+          :key="post.metadata.name"
+          ref="annotationsFormRef"
+          :value="post.metadata.annotations || {}"
+          kind="Post"
+          :form-data="post"
+          group="content.halo.run"
+        />
+      </div>
+    </div>
 
     <template #footer>
       <VSpace>
@@ -92,7 +137,7 @@ async function onSubmit(data: PostFormState) {
         >
           {{ $t("core.common.buttons.save") }}
         </VButton>
-        <VButton type="default" @click="modal.close()">
+        <VButton type="default" @click="modal?.close()">
           {{ $t("core.common.buttons.close") }}
         </VButton>
       </VSpace>

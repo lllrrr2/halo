@@ -1,105 +1,84 @@
 <script lang="ts" setup>
-// core libs
-import { ref } from "vue";
-import { apiClient } from "@/utils/api-client";
-
-// components
+import { consoleApiClient } from "@halo-dev/api-client";
 import {
   IconAddCircle,
   IconBookRead,
   VButton,
   VCard,
   VEmpty,
+  VLoading,
   VPageHeader,
   VSpace,
-  VLoading,
 } from "@halo-dev/components";
+import { Draggable } from "@he-tree/vue";
+import "@he-tree/vue/style/default.css";
+import { ref } from "vue";
 import CategoryEditingModal from "./components/CategoryEditingModal.vue";
 import CategoryListItem from "./components/CategoryListItem.vue";
-
-// types
-import type { Category } from "@halo-dev/api-client";
-import type { CategoryTree } from "./utils";
-import {
-  convertCategoryTreeToCategory,
-  convertTreeToCategories,
-  resetCategoriesTreePriority,
-} from "./utils";
-
-// libs
-import { useDebounceFn } from "@vueuse/core";
-
-// hooks
 import { usePostCategory } from "./composables/use-post-category";
+import { buildCategoryPositionRequest } from "./utils";
 
-const editingModal = ref(false);
-const selectedCategory = ref<Category>();
-const selectedParentCategory = ref<Category>();
+const creationModal = ref(false);
 
 const {
   categories,
   categoriesTree,
+  previousCategoriesTree,
   isLoading,
   handleFetchCategories,
-  handleDelete,
+  setCategoriesTree,
 } = usePostCategory();
 
-const handleUpdateInBatch = useDebounceFn(async () => {
-  const categoriesTreeToUpdate = resetCategoriesTreePriority(
+const positionUpdating = ref(false);
+
+async function handleUpdatePosition() {
+  if (positionUpdating.value) {
+    return;
+  }
+
+  const positionRequest = buildCategoryPositionRequest(
+    previousCategoriesTree.value,
     categoriesTree.value
   );
-  const categoriesToUpdate = convertTreeToCategories(categoriesTreeToUpdate);
-  try {
-    const promises = categoriesToUpdate.map((category) =>
-      apiClient.extension.category.updatecontentHaloRunV1alpha1Category({
-        name: category.metadata.name,
-        category: category,
-      })
-    );
-    await Promise.all(promises);
-  } catch (e) {
-    console.error("Failed to update categories", e);
-  } finally {
+  if (!positionRequest) {
     await handleFetchCategories();
+    return;
   }
-}, 500);
 
-const handleOpenEditingModal = (category: CategoryTree) => {
-  selectedCategory.value = convertCategoryTreeToCategory(category);
-  editingModal.value = true;
-};
-
-const handleOpenCreateByParentModal = (category: CategoryTree) => {
-  selectedParentCategory.value = convertCategoryTreeToCategory(category);
-  editingModal.value = true;
-};
-
-const onEditingModalClose = () => {
-  selectedCategory.value = undefined;
-  selectedParentCategory.value = undefined;
-  handleFetchCategories();
-};
+  try {
+    positionUpdating.value = true;
+    const { data } =
+      await consoleApiClient.content.category.updateCategoryPosition({
+        name: positionRequest.name,
+        categoryPositionRequest: {
+          parentName: positionRequest.parentName,
+          beforeName: positionRequest.beforeName,
+        },
+      });
+    setCategoriesTree(data);
+  } catch (e) {
+    console.error("Failed to update category position", e);
+    await handleFetchCategories();
+  } finally {
+    positionUpdating.value = false;
+  }
+}
 </script>
 <template>
-  <CategoryEditingModal
-    v-model:visible="editingModal"
-    :category="selectedCategory"
-    :parent-category="selectedParentCategory"
-    @close="onEditingModalClose"
-  />
+  <CategoryEditingModal v-if="creationModal" @close="creationModal = false" />
   <VPageHeader :title="$t('core.post_category.title')">
     <template #icon>
-      <IconBookRead class="mr-2 self-center" />
+      <IconBookRead />
     </template>
 
     <template #actions>
       <VButton
         v-permission="['system:posts:manage']"
         type="secondary"
-        @click="editingModal = true"
+        @click="creationModal = true"
       >
         <template #icon>
-          <IconAddCircle class="h-full w-full" />
+          <IconAddCircle />
         </template>
         {{ $t("core.common.buttons.new") }}
       </VButton>
@@ -137,11 +116,11 @@ const onEditingModalClose = () => {
               </VButton>
               <VButton
                 v-permission="['system:posts:manage']"
-                type="primary"
-                @click="editingModal = true"
+                type="secondary"
+                @click="creationModal = true"
               >
                 <template #icon>
-                  <IconAddCircle class="h-full w-full" />
+                  <IconAddCircle />
                 </template>
                 {{ $t("core.common.buttons.new") }}
               </VButton>
@@ -150,14 +129,33 @@ const onEditingModalClose = () => {
         </VEmpty>
       </Transition>
       <Transition v-else appear name="fade">
-        <CategoryListItem
-          :categories="categoriesTree"
-          @change="handleUpdateInBatch"
-          @delete="handleDelete"
-          @open-editing="handleOpenEditingModal"
-          @open-create-by-parent="handleOpenCreateByParentModal"
-        />
+        <Draggable
+          v-model="categoriesTree"
+          :class="{
+            'cursor-progress opacity-60': positionUpdating,
+          }"
+          :disable-drag="positionUpdating"
+          trigger-class="drag-element"
+          :indent="40"
+          @after-drop="handleUpdatePosition"
+        >
+          <template #default="{ node }">
+            <CategoryListItem :category-tree-node="node" />
+          </template>
+        </Draggable>
       </Transition>
     </VCard>
   </div>
 </template>
+<style scoped>
+:deep(.vtlist-inner) {
+  @apply divide-y divide-gray-100;
+}
+:deep(.he-tree-drag-placeholder) {
+  box-sizing: border-box;
+  height: 60px;
+  width: 100%;
+  border: 1px dashed #00d9ff;
+  background: #ddf2f9;
+}
+</style>
